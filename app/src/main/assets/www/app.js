@@ -2140,6 +2140,19 @@ function deckCardClass(card) {
   return 'trainer';
 }
 
+function deckCardTypes(card) {
+  const types = new Set();
+  for (const pokemonId of (card?.pokemonIds || [])) {
+    const pokemon = pokemonMap.get(Number(pokemonId));
+    for (const type of (pokemon?.types || [])) types.add(type);
+  }
+  return [...types];
+}
+
+function deckNameKey(card) {
+  return normalize(card?.name || '');
+}
+
 function deckCardLimit(card) {
   return deckCardClass(card) === 'energy' ? 60 : 4;
 }
@@ -2157,15 +2170,51 @@ function deckBreakdown(deck) {
   return result;
 }
 
-function deckStrengthScore(card) {
+function deckNameQuantity(deck, card, ignoreCardId = null) {
+  const key = deckNameKey(card);
+  return Object.entries(deck?.cards || {}).reduce((sum, [cardId, qty]) => {
+    if (cardId === ignoreCardId) return sum;
+    const other = cardMap.get(cardId);
+    return sum + (other && deckNameKey(other) === key ? Math.max(0, Number(qty) || 0) : 0);
+  }, 0);
+}
+
+function deckStrengthScore(card, preferredType = '') {
   const name = normalize(card?.name);
   let score = 1;
-  if (/\bex\b|vmax|vstar|\bgx\b/.test(name)) score += 12;
-  else if (/\bv\b|break|prime|level x/.test(name)) score += 8;
-  if (/boss|pesquisa|professor|ultra bola|ninho|captura|rare candy|doce raro|switch|troca|ordens/.test(name)) score += 7;
-  if (/energia/.test(name)) score += 2;
+  if (/\bex\b|vmax|vstar|\bgx\b/.test(name)) score += 14;
+  else if (/\bv\b|break|prime|level x/.test(name)) score += 9;
+  if (/ordens do chefe|boss|pesquisa de professores|professor|ultra bola|bola ninho|ninho|captura|doce raro|rare candy|troca|switch|recuperacao|recuperação/.test(name)) score += 8;
+  if (/energia|energy/.test(name)) score += 3;
+  if (preferredType && deckCardTypes(card).includes(preferredType)) score += 10;
   score += Math.min(4, quantityFor(card.id));
   return score;
+}
+
+function deckValidation(deck) {
+  const errors = [];
+  const warnings = [];
+  const total = deckTotal(deck);
+  const split = deckBreakdown(deck);
+  if (total !== 60) errors.push(`O deck precisa ter exatamente 60 cartas; atualmente tem ${total}.`);
+  if (!split.pokemon) errors.push('O deck precisa ter pelo menos um Pokémon.');
+  if (!split.energy) warnings.push('Nenhuma Energia foi encontrada no deck.');
+  if (split.pokemon < 10) warnings.push('Poucos Pokémon: o deck pode ter dificuldade para iniciar a partida.');
+  if (split.trainer < 20) warnings.push('Poucos Treinadores: o deck pode ficar inconsistente.');
+  const byName = new Map();
+  for (const [cardId, qtyRaw] of Object.entries(deck?.cards || {})) {
+    const card = cardMap.get(cardId);
+    const qty = Math.max(0, Number(qtyRaw) || 0);
+    if (!card || !qty) continue;
+    if (qty > quantityFor(cardId)) errors.push(`${card.name}: o deck usa ${qty}, mas você possui ${quantityFor(cardId)}.`);
+    if (deckCardClass(card) !== 'energy') {
+      const key = deckNameKey(card);
+      byName.set(key, { name: card.name, qty: (byName.get(key)?.qty || 0) + qty });
+    }
+  }
+  for (const item of byName.values()) if (item.qty > 4) errors.push(`${item.name}: máximo de 4 cópias somando todas as versões.`);
+  const score = Math.max(0, Math.min(100, 100 - errors.length * 25 - warnings.length * 7 + (total === 60 ? 10 : 0)));
+  return { valid: !errors.length, errors, warnings, score, total, split };
 }
 
 function addDeckCardQuantity(target, cardId, wanted) {
@@ -2173,41 +2222,53 @@ function addDeckCardQuantity(target, cardId, wanted) {
   if (!card) return 0;
   const available = quantityFor(cardId);
   const current = Math.max(0, Number(target[cardId]) || 0);
-  const allowed = Math.min(available, deckCardLimit(card));
-  const add = Math.max(0, Math.min(Number(wanted) || 0, allowed - current));
+  const sameNameElsewhere = deckCardClass(card) === 'energy' ? 0 : deckNameQuantity({ cards: target }, card, cardId);
+  const nameLimit = deckCardClass(card) === 'energy' ? 60 : Math.max(0, 4 - sameNameElsewhere);
+  const allowed = Math.min(available, deckCardLimit(card), nameLimit);
+  const room = Math.max(0, 60 - Object.values(target).reduce((a,b)=>a+Math.max(0,Number(b)||0),0));
+  const add = Math.max(0, Math.min(Number(wanted) || 0, allowed - current, room));
   if (add) target[cardId] = current + add;
   return add;
+}
+
+function availableDeckTypes() {
+  const counts = new Map();
+  for (const item of ownedDeckPool()) for (const type of deckCardTypes(item.card)) counts.set(type, (counts.get(type) || 0) + item.owned);
+  return [...counts.entries()].sort((a,b)=>b[1]-a[1] || a[0].localeCompare(b[0],'pt-BR'));
 }
 
 function generateStrongDeck() {
   const pool = ownedDeckPool();
   if (!pool.length) return notify('Cadastre cartas antes de gerar um deck.');
+  const preferredType = document.getElementById('deckPreferredType')?.value || '';
   const groups = { pokemon: [], trainer: [], energy: [] };
   pool.forEach(item => groups[deckCardClass(item.card)].push(item));
-  Object.values(groups).forEach(list => list.sort((a,b) => deckStrengthScore(b.card)-deckStrengthScore(a.card) || b.owned-a.owned || a.card.name.localeCompare(b.card.name,'pt-BR')));
+  Object.values(groups).forEach(list => list.sort((a,b) => deckStrengthScore(b.card, preferredType)-deckStrengthScore(a.card, preferredType) || b.owned-a.owned || a.card.name.localeCompare(b.card.name,'pt-BR')));
+  if (preferredType) groups.pokemon.sort((a,b) => Number(deckCardTypes(b.card).includes(preferredType))-Number(deckCardTypes(a.card).includes(preferredType)) || deckStrengthScore(b.card,preferredType)-deckStrengthScore(a.card,preferredType));
   const target = {};
   const fill = (list, desired) => {
-    let total = 0;
+    let added = 0;
     for (const item of list) {
-      if (total >= desired) break;
-      total += addDeckCardQuantity(target, item.card.id, Math.min(item.owned, desired-total, deckCardLimit(item.card)));
+      if (added >= desired || deckTotal({cards:target}) >= 60) break;
+      added += addDeckCardQuantity(target, item.card.id, Math.min(item.owned, desired-added));
     }
-    return total;
+    return added;
   };
-  fill(groups.pokemon, 18);
-  fill(groups.trainer, 30);
+  fill(groups.pokemon, 16);
+  fill(groups.trainer, 32);
   fill(groups.energy, 12);
-  const all = [...groups.pokemon, ...groups.trainer, ...groups.energy];
-  let total = Object.values(target).reduce((a,b)=>a+b,0);
+  const all = [...groups.trainer, ...groups.pokemon, ...groups.energy];
   for (const item of all) {
-    if (total >= 60) break;
-    total += addDeckCardQuantity(target, item.card.id, 60-total);
+    if (deckTotal({cards:target}) >= 60) break;
+    addDeckCardQuantity(target, item.card.id, 60-deckTotal({cards:target}));
   }
   state.decks = state.decks || [];
-  const deck = { id: `deck-${Date.now()}`, name: `Deck forte ${state.decks.length + 1}`, cards: target, createdAt: new Date().toISOString(), generated: true };
+  const deck = { id: `deck-${Date.now()}`, name: `Deck forte ${preferredType || state.decks.length + 1}`, cards: target, preferredType, createdAt: new Date().toISOString(), generated: true };
   state.decks.push(deck);
   selectedDeckId = deck.id;
-  saveState(); render(); notify(`Deck criado com ${deckTotal(deck)} cartas da sua coleção.`);
+  saveState(); render();
+  const validation = deckValidation(deck);
+  notify(validation.valid ? 'Deck válido de 60 cartas criado.' : `Deck criado com ${validation.total} cartas. Confira os avisos.`);
 }
 
 function renderDeckCardRow(deck, cardId, qty) {
@@ -2222,13 +2283,15 @@ function renderDeckCardRow(deck, cardId, qty) {
 }
 
 function renderDeckEditor(deck) {
-  const total = deckTotal(deck);
-  const split = deckBreakdown(deck);
+  const report = deckValidation(deck);
   const entries = Object.entries(deck.cards || {}).filter(([,q]) => Number(q)>0).sort((a,b)=>deckCardClass(cardMap.get(a[0])).localeCompare(deckCardClass(cardMap.get(b[0]))) || (cardMap.get(a[0])?.name||'').localeCompare(cardMap.get(b[0])?.name||'','pt-BR'));
+  const messages = [...report.errors.map(x=>`<li class="deck-error">${esc(x)}</li>`), ...report.warnings.map(x=>`<li class="deck-warning">${esc(x)}</li>`)].join('');
   return `<section class="screen">
     <button class="back-btn" onclick="selectedDeckId=null;render()">← Voltar aos decks</button>
     <div class="deck-editor-head"><div><h2 class="screen-title">${esc(deck.name)}</h2><p class="screen-subtitle">Edite usando somente as cartas que você possui.</p></div><button class="danger-btn compact-btn" onclick="deleteDeck('${esc(deck.id)}')">Excluir</button></div>
-    <div class="deck-summary ${total===60?'valid':'invalid'}"><strong>${total}/60 cartas</strong><span>${split.pokemon} Pokémon · ${split.trainer} Treinadores · ${split.energy} Energias</span><small>${total===60?'Deck com 60 cartas.':'Ajuste até completar 60 cartas.'}</small></div>
+    <div class="deck-summary ${report.valid?'valid':'invalid'}"><strong>${report.total}/60 cartas · força ${report.score}/100</strong><span>${report.split.pokemon} Pokémon · ${report.split.trainer} Treinadores · ${report.split.energy} Energias</span><small>${report.valid?'Deck validado para batalha.':'Ainda existem ajustes necessários.'}</small></div>
+    ${messages ? `<ul class="deck-validation">${messages}</ul>` : ''}
+    <div class="deck-actions"><button class="secondary-btn" onclick="renameDeck('${esc(deck.id)}')">Renomear</button><button class="secondary-btn" onclick="duplicateDeck('${esc(deck.id)}')">Duplicar</button><button class="secondary-btn" onclick="exportDeckList('${esc(deck.id)}')">Exportar lista</button></div>
     <div class="deck-search"><input id="deckCardSearch" class="field" placeholder="Buscar nas minhas cartas"><button class="primary-btn" onclick="openDeckCardPicker('${esc(deck.id)}')">Adicionar carta</button></div>
     <div class="deck-card-list">${entries.length ? entries.map(([id,q])=>renderDeckCardRow(deck,id,q)).join('') : '<div class="empty">Este deck ainda está vazio.</div>'}</div>
   </section>`;
@@ -2238,12 +2301,13 @@ function renderDecks() {
   const decks = state.decks || [];
   const selected = decks.find(deck => deck.id === selectedDeckId);
   if (selected) return renderDeckEditor(selected);
+  const types = availableDeckTypes();
   return `<section class="screen">
     <h2 class="screen-title">Decks</h2>
-    <p class="screen-subtitle">Monte automaticamente um baralho com as cartas que você possui e depois edite cada quantidade.</p>
-    <button class="primary-btn full-btn" onclick="generateStrongDeck()">⚔️ Montar deck forte automaticamente</button>
+    <p class="screen-subtitle">Monte um baralho de 60 cartas usando apenas o que existe no seu fichário. O gerador prioriza Pokémon do tipo escolhido e cartas de suporte.</p>
+    <div class="deck-generator"><select id="deckPreferredType" class="field"><option value="">Melhor combinação geral</option>${types.map(([type,count])=>`<option value="${esc(type)}">Foco ${esc(type)} (${count} cópias)</option>`).join('')}</select><button class="primary-btn" onclick="generateStrongDeck()">⚔️ Montar deck forte</button></div>
     <div class="deck-row"><input id="deckName" class="field" placeholder="Nome do novo deck"><button class="primary-btn" onclick="addDeck()">Criar vazio</button></div>
-    <div class="set-list">${decks.length ? decks.map(deck => { const split=deckBreakdown(deck); const total=deckTotal(deck); return `<button class="panel deck-panel" onclick="selectedDeckId='${esc(deck.id)}';render()"><div class="set-title-row"><span class="set-name">${esc(deck.name)}</span><span class="badge ${total===60?'owned':''}">${total}/60</span></div><p class="card-meta">${split.pokemon} Pokémon · ${split.trainer} Treinadores · ${split.energy} Energias</p></button>`; }).join('') : '<div class="empty"><strong>Nenhum deck criado</strong>Use o gerador automático ou crie um deck vazio.</div>'}</div>
+    <div class="set-list">${decks.length ? decks.map(deck => { const report=deckValidation(deck); return `<button class="panel deck-panel" onclick="selectedDeckId='${esc(deck.id)}';render()"><div class="set-title-row"><span class="set-name">${esc(deck.name)}</span><span class="badge ${report.valid?'owned':''}">${report.total}/60</span></div><p class="card-meta">${report.split.pokemon} Pokémon · ${report.split.trainer} Treinadores · ${report.split.energy} Energias · força ${report.score}/100</p></button>`; }).join('') : '<div class="empty"><strong>Nenhum deck criado</strong>Use o gerador automático ou crie um deck vazio.</div>'}</div>
   </section>`;
 }
 
@@ -2263,15 +2327,44 @@ function deleteDeck(id) {
   saveState(); render();
 }
 
+function renameDeck(id) {
+  const deck = (state.decks || []).find(item => item.id === id);
+  if (!deck) return;
+  const name = prompt('Novo nome do deck:', deck.name);
+  if (!name?.trim()) return;
+  deck.name = name.trim(); saveState(); render();
+}
+
+function duplicateDeck(id) {
+  const source = (state.decks || []).find(item => item.id === id);
+  if (!source) return;
+  const copy = { ...source, id:`deck-${Date.now()}`, name:`${source.name} (cópia)`, cards:{...(source.cards||{})}, createdAt:new Date().toISOString(), generated:false };
+  state.decks.push(copy); selectedDeckId=copy.id; saveState(); render(); notify('Deck duplicado.');
+}
+
+function exportDeckList(id) {
+  const deck = (state.decks || []).find(item => item.id === id);
+  if (!deck) return;
+  const lines = Object.entries(deck.cards || {}).filter(([,q])=>Number(q)>0).map(([cardId,qty])=>{const card=cardMap.get(cardId);return card?`${qty}x ${card.name} — ${card.setName} ${card.number}`:''}).filter(Boolean);
+  const text = `${deck.name}\n\n${lines.join('\n')}\n\nTotal: ${deckTotal(deck)} cartas`;
+  if (navigator.share) navigator.share({title:deck.name,text}).catch(()=>{});
+  else if (navigator.clipboard) navigator.clipboard.writeText(text).then(()=>notify('Lista copiada.')).catch(()=>showModal(`<pre>${esc(text)}</pre>`));
+  else showModal(`<button class="modal-close" onclick="closeModal()">×</button><h2>${esc(deck.name)}</h2><pre>${esc(text)}</pre>`);
+}
+
 function changeDeckCard(deckId, cardId, delta) {
   const deck = (state.decks || []).find(item => item.id === deckId);
   const card = cardMap.get(cardId);
   if (!deck || !card) return;
   deck.cards = deck.cards || {};
   const current = Math.max(0, Number(deck.cards[cardId]) || 0);
-  const max = Math.min(quantityFor(cardId), deckCardLimit(card));
-  const next = Math.max(0, Math.min(max, current + Number(delta || 0)));
+  const sameNameElsewhere = deckCardClass(card) === 'energy' ? 0 : deckNameQuantity(deck, card, cardId);
+  const nameLimit = deckCardClass(card) === 'energy' ? 60 : Math.max(0, 4-sameNameElsewhere);
+  const max = Math.min(quantityFor(cardId), deckCardLimit(card), nameLimit);
+  const roomMax = current + Math.max(0, 60-deckTotal(deck));
+  const next = Math.max(0, Math.min(max, roomMax, current + Number(delta || 0)));
   if (next) deck.cards[cardId] = next; else delete deck.cards[cardId];
+  if (delta > 0 && next === current) notify(deckTotal(deck)>=60 ? 'O deck já tem 60 cartas.' : 'Limite de cópias atingido.');
   saveState(); render();
 }
 
@@ -2279,9 +2372,10 @@ function openDeckCardPicker(deckId) {
   const deck = (state.decks || []).find(item => item.id === deckId);
   if (!deck) return;
   const query = normalize(document.getElementById('deckCardSearch')?.value || '');
-  const pool = ownedDeckPool().filter(item => !query || normalize(`${item.card.name} ${item.card.number} ${item.card.setName}`).includes(query)).slice(0,120);
-  showModal(`<button class="modal-close" onclick="closeModal()">×</button><h2>Adicionar carta ao deck</h2><p class="screen-subtitle">A quantidade máxima respeita o que existe no seu fichário.</p><div class="deck-picker">${pool.length ? pool.map(item=>`<button onclick="changeDeckCard('${esc(deckId)}','${esc(item.card.id)}',1);closeModal()"><strong>${esc(item.card.name)}</strong><span>${esc(item.card.number)} · ${esc(item.card.setName)} · você tem ${item.owned}</span></button>`).join('') : '<div class="empty">Nenhuma carta encontrada.</div>'}</div>`);
+  const pool = ownedDeckPool().filter(item => !query || normalize(`${item.card.name} ${item.card.number} ${item.card.setName}`).includes(query)).sort((a,b)=>deckStrengthScore(b.card,deck.preferredType)-deckStrengthScore(a.card,deck.preferredType)).slice(0,160);
+  showModal(`<button class="modal-close" onclick="closeModal()">×</button><h2>Adicionar carta ao deck</h2><p class="screen-subtitle">Respeita sua quantidade, o limite de 4 cópias pelo mesmo nome e o máximo de 60 cartas.</p><div class="deck-picker">${pool.length ? pool.map(item=>`<button onclick="changeDeckCard('${esc(deckId)}','${esc(item.card.id)}',1);closeModal()"><strong>${esc(item.card.name)}</strong><span>${esc(item.card.number)} · ${esc(item.card.setName)} · você tem ${item.owned} · ${deckCardClass(item.card)}</span></button>`).join('') : '<div class="empty">Nenhuma carta encontrada.</div>'}</div>`);
 }
+
 
 function option(value, label, selected) {
   return `<option value="${esc(value)}" ${value === selected ? 'selected' : ''}>${esc(label)}</option>`;
