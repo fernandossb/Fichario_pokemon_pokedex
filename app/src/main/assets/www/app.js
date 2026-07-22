@@ -16,7 +16,7 @@ const PRICE_CACHE_KEY = 'fichario-pokemon-price-cache-v1';
 const FX_CACHE_KEY = 'fichario-pokemon-fx-cache-v1';
 const LIGA_SET_CACHE_KEY = 'fichario-pokemon-liga-set-cache-v1';
 const PRICE_LOGIC_VERSION_KEY = 'fichario-pokemon-price-logic-version';
-const PRICE_LOGIC_VERSION = 7;
+const PRICE_LOGIC_VERSION = 8;
 const PRICE_CACHE_TTL = 24 * 60 * 60 * 1000;
 const FX_CACHE_TTL = 24 * 60 * 60 * 1000;
 const TCGDEX_API_BASE = 'https://api.tcgdex.net/v2/pt';
@@ -56,6 +56,8 @@ let priceUpdateMessage = '';
 let priceUpdateCurrent = 0;
 let priceUpdateTotal = 1;
 let priceUpdateFailures = 0;
+let lastPriceDiagnostic = '';
+let selectedDeckId = null;
 
 const ui = {
   tab: 'dashboard',
@@ -180,8 +182,8 @@ function ligaPlainText(html) {
 }
 
 function ligaMoneyValues(text) {
-  const matches = String(text || '').match(/R\$\s*\d{1,3}(?:\.\d{3})*,\d{2}/g) || [];
-  return matches.map(parseBrazilianMoney).filter(value => value != null);
+  const matches = String(text || '').match(/R\$\s*\d{1,3}(?:\.\d{3})*(?:,\d{1,2})?/g) || [];
+  return matches.map(parseBrazilianMoney).filter(value => value != null && value >= 0);
 }
 
 function ligaRowFromText(text, labelRegex) {
@@ -192,32 +194,36 @@ function ligaRowFromText(text, labelRegex) {
   let match;
   while ((match = pattern.exec(source))) {
     const start = match.index;
-    const following = source.slice(start, start + 650);
-    const nextLabel = following.slice(match[0].length).search(/\b(?:Normal|Reverse\s*Foil|Holo\s*Foil|Holofoil|Hologr[aá]fica)\b/i);
-    const segment = nextLabel >= 0
-      ? following.slice(0, match[0].length + nextLabel)
-      : following;
+    const following = source.slice(start, start + 1200);
+    const nextLabel = following.slice(match[0].length).search(/\b(?:Normal|Reverse\s*Foil|Reverse|Holo\s*Foil|Holofoil|Hologr[aá]fica)\b/i);
+    const segment = nextLabel >= 0 ? following.slice(0, match[0].length + nextLabel) : following;
     const prices = ligaMoneyValues(segment);
-    if (prices.length >= 3) {
-      const thirdPriceText = segment.match(/R\$\s*\d{1,3}(?:\.\d{3})*,\d{2}/g)?.[2] || '';
-      const distance = thirdPriceText ? segment.indexOf(thirdPriceText) : segment.length;
-      candidates.push({ prices, distance, segmentLength: segment.length });
-    }
+    if (prices.length) candidates.push({ prices, segmentLength: segment.length });
     if (pattern.lastIndex === match.index) pattern.lastIndex++;
   }
   if (!candidates.length) return null;
-  candidates.sort((a, b) => a.distance - b.distance || a.segmentLength - b.segmentLength);
+  candidates.sort((a, b) => b.prices.length - a.prices.length || a.segmentLength - b.segmentLength);
   const prices = candidates[0].prices;
-  return { low: prices[0], average: prices[1], high: prices[2] };
+  if (prices.length >= 3) return { low: prices[0], average: prices[1], high: prices[2] };
+  if (prices.length === 2) return { low: prices[0], average: prices[1], high: prices[1] };
+  return { low: prices[0], average: prices[0], high: prices[0] };
 }
 
 function parseLigaPokemonHtml(html) {
   const text = ligaPlainText(html);
-  return {
-    normal: ligaRowFromText(text, /\bNormal\b/i),
-    reverse: ligaRowFromText(text, /\bReverse\s*Foil\b/i),
-    holo: ligaRowFromText(text, /\b(?:Holo\s*Foil|Holofoil|Hologr[aá]fica)\b/i),
-  };
+  const normal = ligaRowFromText(text, /\bNormal\b/i);
+  const reverse = ligaRowFromText(text, /\b(?:Reverse\s*Foil|Reverse)\b/i);
+  const holo = ligaRowFromText(text, /\b(?:Holo\s*Foil|Holofoil|Hologr[aá]fica|Holo)\b/i);
+  if (normal || reverse || holo) return { normal, reverse, holo };
+  const averageAnchor = text.search(/Pre[cç]o\s+M[eé]dio(?:\s+de\s+Venda)?/i);
+  if (averageAnchor >= 0) {
+    const values = ligaMoneyValues(text.slice(averageAnchor, averageAnchor + 900));
+    if (values.length) {
+      const average = values.length >= 2 ? values[1] : values[0];
+      return { normal: { low: values[0], average, high: values[2] ?? average }, reverse: null, holo: null };
+    }
+  }
+  return { normal: null, reverse: null, holo: null };
 }
 
 function ligaNumberPart(value, width = 3) {
@@ -260,8 +266,15 @@ async function ligaSetCode(setId) {
 
 function ligaPokemonCardUrls(card, setCode) {
   const number = ligaCardNumber(card);
-  const query = `view=cards/card&card=${encodeURIComponent(`${card.name} (${number.full})`)}&ed=${encodeURIComponent(setCode)}&num=${encodeURIComponent(number.numerator)}`;
-  return LIGA_POKEMON_BASES.map(base => `${base}?${query}`);
+  const cardLabel = `${card.name} (${number.full})`;
+  const direct = `view=cards/card&card=${encodeURIComponent(cardLabel)}&ed=${encodeURIComponent(setCode)}&num=${encodeURIComponent(number.numerator)}`;
+  const search = `view=cards/search&card=${encodeURIComponent(card.name)}&ed=${encodeURIComponent(setCode)}`;
+  const urls = [];
+  for (const base of LIGA_POKEMON_BASES) {
+    urls.push(`${base}?${direct}`);
+    urls.push(`${base}?${search}`);
+  }
+  return [...new Set(urls)];
 }
 
 const nativeLigaRequests = new Map();
@@ -328,13 +341,15 @@ async function fetchLigaPokemonPricing(cardId) {
       if (rows.normal || rows.reverse || rows.holo) {
         return { ...rows, setCode, url, fetchedAt: Date.now() };
       }
-      const sample = ligaPlainText(html).slice(0, 180);
-      errors.push(`sem tabela em ${new URL(url).host}: ${sample || 'página vazia'}`);
+      const sample = ligaPlainText(html).slice(0, 240);
+      errors.push(`sem preço em ${new URL(url).host}: ${sample || 'página vazia'}`);
     } catch (error) {
       errors.push(`${new URL(url).host}: ${String(error?.message || error || 'falha')}`);
     }
   }
-  throw new Error(`Liga indisponível após consultar o endereço oficial da carta. ${errors.join(' | ')}`);
+  lastPriceDiagnostic = errors.join(' | ');
+  try { localStorage.setItem('fichario-price-last-diagnostic', lastPriceDiagnostic); } catch (_) {}
+  throw new Error(`Liga indisponível. ${lastPriceDiagnostic}`);
 }
 
 function ligaPokemonAverageQuote(liga, kind) {
@@ -1803,7 +1818,10 @@ async function updateCardPrice(cardId, finish = 'comum', force = false) {
       : 'A Liga Pokémon não retornou preço para esta carta.');
   } catch (error) {
     refreshAutomaticPriceField(cardId, finish);
-    notify(error?.name === 'AbortError' ? 'A consulta demorou demais.' : 'Não foi possível consultar o preço agora.');
+    const message = error?.name === 'AbortError' ? 'A consulta demorou demais.' : String(error?.message || 'Não foi possível consultar o preço agora.');
+    lastPriceDiagnostic = message;
+    try { localStorage.setItem('fichario-price-last-diagnostic', message); } catch (_) {}
+    notify(message.length > 180 ? `${message.slice(0, 177)}...` : message);
   }
 }
 
@@ -1999,13 +2017,122 @@ function renderPokemonDetail(id) {
   </section>`;
 }
 
+function ownedDeckPool() {
+  return cards.map(card => ({ card, owned: quantityFor(card.id) }))
+    .filter(item => item.owned > 0);
+}
+
+function deckCardClass(card) {
+  const name = normalize(card?.name);
+  if (/energia|energy/.test(name)) return 'energy';
+  if (Array.isArray(card?.pokemonIds) && card.pokemonIds.length) return 'pokemon';
+  return 'trainer';
+}
+
+function deckCardLimit(card) {
+  return deckCardClass(card) === 'energy' ? 60 : 4;
+}
+
+function deckTotal(deck) {
+  return Object.values(deck?.cards || {}).reduce((sum, value) => sum + Math.max(0, Number(value) || 0), 0);
+}
+
+function deckBreakdown(deck) {
+  const result = { pokemon: 0, trainer: 0, energy: 0 };
+  for (const [cardId, qty] of Object.entries(deck?.cards || {})) {
+    const card = cardMap.get(cardId);
+    if (card) result[deckCardClass(card)] += Math.max(0, Number(qty) || 0);
+  }
+  return result;
+}
+
+function deckStrengthScore(card) {
+  const name = normalize(card?.name);
+  let score = 1;
+  if (/\bex\b|vmax|vstar|\bgx\b/.test(name)) score += 12;
+  else if (/\bv\b|break|prime|level x/.test(name)) score += 8;
+  if (/boss|pesquisa|professor|ultra bola|ninho|captura|rare candy|doce raro|switch|troca|ordens/.test(name)) score += 7;
+  if (/energia/.test(name)) score += 2;
+  score += Math.min(4, quantityFor(card.id));
+  return score;
+}
+
+function addDeckCardQuantity(target, cardId, wanted) {
+  const card = cardMap.get(cardId);
+  if (!card) return 0;
+  const available = quantityFor(cardId);
+  const current = Math.max(0, Number(target[cardId]) || 0);
+  const allowed = Math.min(available, deckCardLimit(card));
+  const add = Math.max(0, Math.min(Number(wanted) || 0, allowed - current));
+  if (add) target[cardId] = current + add;
+  return add;
+}
+
+function generateStrongDeck() {
+  const pool = ownedDeckPool();
+  if (!pool.length) return notify('Cadastre cartas antes de gerar um deck.');
+  const groups = { pokemon: [], trainer: [], energy: [] };
+  pool.forEach(item => groups[deckCardClass(item.card)].push(item));
+  Object.values(groups).forEach(list => list.sort((a,b) => deckStrengthScore(b.card)-deckStrengthScore(a.card) || b.owned-a.owned || a.card.name.localeCompare(b.card.name,'pt-BR')));
+  const target = {};
+  const fill = (list, desired) => {
+    let total = 0;
+    for (const item of list) {
+      if (total >= desired) break;
+      total += addDeckCardQuantity(target, item.card.id, Math.min(item.owned, desired-total, deckCardLimit(item.card)));
+    }
+    return total;
+  };
+  fill(groups.pokemon, 18);
+  fill(groups.trainer, 30);
+  fill(groups.energy, 12);
+  const all = [...groups.pokemon, ...groups.trainer, ...groups.energy];
+  let total = Object.values(target).reduce((a,b)=>a+b,0);
+  for (const item of all) {
+    if (total >= 60) break;
+    total += addDeckCardQuantity(target, item.card.id, 60-total);
+  }
+  state.decks = state.decks || [];
+  const deck = { id: `deck-${Date.now()}`, name: `Deck forte ${state.decks.length + 1}`, cards: target, createdAt: new Date().toISOString(), generated: true };
+  state.decks.push(deck);
+  selectedDeckId = deck.id;
+  saveState(); render(); notify(`Deck criado com ${deckTotal(deck)} cartas da sua coleção.`);
+}
+
+function renderDeckCardRow(deck, cardId, qty) {
+  const card = cardMap.get(cardId);
+  if (!card) return '';
+  const owned = quantityFor(cardId);
+  return `<div class="deck-card-row">
+    ${card.imageUrl ? `<img src="${esc(card.imageUrl)}" onerror="this.style.display='none'">` : ''}
+    <div class="deck-card-info"><strong>${esc(card.name)}</strong><span>${esc(card.number)} · ${esc(card.setName)} · você tem ${owned}</span></div>
+    <div class="deck-qty"><button onclick="changeDeckCard('${esc(deck.id)}','${esc(cardId)}',-1)">−</button><b>${qty}</b><button onclick="changeDeckCard('${esc(deck.id)}','${esc(cardId)}',1)">+</button></div>
+  </div>`;
+}
+
+function renderDeckEditor(deck) {
+  const total = deckTotal(deck);
+  const split = deckBreakdown(deck);
+  const entries = Object.entries(deck.cards || {}).filter(([,q]) => Number(q)>0).sort((a,b)=>deckCardClass(cardMap.get(a[0])).localeCompare(deckCardClass(cardMap.get(b[0]))) || (cardMap.get(a[0])?.name||'').localeCompare(cardMap.get(b[0])?.name||'','pt-BR'));
+  return `<section class="screen">
+    <button class="back-btn" onclick="selectedDeckId=null;render()">← Voltar aos decks</button>
+    <div class="deck-editor-head"><div><h2 class="screen-title">${esc(deck.name)}</h2><p class="screen-subtitle">Edite usando somente as cartas que você possui.</p></div><button class="danger-btn compact-btn" onclick="deleteDeck('${esc(deck.id)}')">Excluir</button></div>
+    <div class="deck-summary ${total===60?'valid':'invalid'}"><strong>${total}/60 cartas</strong><span>${split.pokemon} Pokémon · ${split.trainer} Treinadores · ${split.energy} Energias</span><small>${total===60?'Deck com 60 cartas.':'Ajuste até completar 60 cartas.'}</small></div>
+    <div class="deck-search"><input id="deckCardSearch" class="field" placeholder="Buscar nas minhas cartas"><button class="primary-btn" onclick="openDeckCardPicker('${esc(deck.id)}')">Adicionar carta</button></div>
+    <div class="deck-card-list">${entries.length ? entries.map(([id,q])=>renderDeckCardRow(deck,id,q)).join('') : '<div class="empty">Este deck ainda está vazio.</div>'}</div>
+  </section>`;
+}
+
 function renderDecks() {
   const decks = state.decks || [];
+  const selected = decks.find(deck => deck.id === selectedDeckId);
+  if (selected) return renderDeckEditor(selected);
   return `<section class="screen">
     <h2 class="screen-title">Decks</h2>
-    <p class="screen-subtitle">Crie listas para organizar ideias de baralhos.</p>
-    <div class="deck-row"><input id="deckName" class="field" placeholder="Nome do novo deck"><button class="primary-btn" onclick="addDeck()">Criar</button></div>
-    <div class="set-list">${decks.length ? decks.map(deck => `<div class="panel"><div class="set-title-row"><span class="set-name">${esc(deck.name)}</span><button class="danger-btn" style="width:auto;min-height:35px;padding:6px 10px" onclick="deleteDeck('${esc(deck.id)}')">Excluir</button></div><p class="card-meta">${Object.keys(deck.cards || {}).length} cartas vinculadas</p></div>`).join('') : '<div class="empty"><strong>Nenhum deck criado</strong>Digite um nome acima para começar.</div>'}</div>
+    <p class="screen-subtitle">Monte automaticamente um baralho com as cartas que você possui e depois edite cada quantidade.</p>
+    <button class="primary-btn full-btn" onclick="generateStrongDeck()">⚔️ Montar deck forte automaticamente</button>
+    <div class="deck-row"><input id="deckName" class="field" placeholder="Nome do novo deck"><button class="primary-btn" onclick="addDeck()">Criar vazio</button></div>
+    <div class="set-list">${decks.length ? decks.map(deck => { const split=deckBreakdown(deck); const total=deckTotal(deck); return `<button class="panel deck-panel" onclick="selectedDeckId='${esc(deck.id)}';render()"><div class="set-title-row"><span class="set-name">${esc(deck.name)}</span><span class="badge ${total===60?'owned':''}">${total}/60</span></div><p class="card-meta">${split.pokemon} Pokémon · ${split.trainer} Treinadores · ${split.energy} Energias</p></button>`; }).join('') : '<div class="empty"><strong>Nenhum deck criado</strong>Use o gerador automático ou crie um deck vazio.</div>'}</div>
   </section>`;
 }
 
@@ -2014,13 +2141,35 @@ function addDeck() {
   const name = input?.value.trim();
   if (!name) return notify('Digite um nome para o deck');
   state.decks = state.decks || [];
-  state.decks.push({ id: String(Date.now()), name, cards: {} });
+  const deck = { id: `deck-${Date.now()}`, name, cards: {}, createdAt: new Date().toISOString() };
+  state.decks.push(deck); selectedDeckId = deck.id;
   saveState(); render(); notify('Deck criado');
 }
 
 function deleteDeck(id) {
   state.decks = (state.decks || []).filter(deck => deck.id !== id);
+  if (selectedDeckId === id) selectedDeckId = null;
   saveState(); render();
+}
+
+function changeDeckCard(deckId, cardId, delta) {
+  const deck = (state.decks || []).find(item => item.id === deckId);
+  const card = cardMap.get(cardId);
+  if (!deck || !card) return;
+  deck.cards = deck.cards || {};
+  const current = Math.max(0, Number(deck.cards[cardId]) || 0);
+  const max = Math.min(quantityFor(cardId), deckCardLimit(card));
+  const next = Math.max(0, Math.min(max, current + Number(delta || 0)));
+  if (next) deck.cards[cardId] = next; else delete deck.cards[cardId];
+  saveState(); render();
+}
+
+function openDeckCardPicker(deckId) {
+  const deck = (state.decks || []).find(item => item.id === deckId);
+  if (!deck) return;
+  const query = normalize(document.getElementById('deckCardSearch')?.value || '');
+  const pool = ownedDeckPool().filter(item => !query || normalize(`${item.card.name} ${item.card.number} ${item.card.setName}`).includes(query)).slice(0,120);
+  showModal(`<button class="modal-close" onclick="closeModal()">×</button><h2>Adicionar carta ao deck</h2><p class="screen-subtitle">A quantidade máxima respeita o que existe no seu fichário.</p><div class="deck-picker">${pool.length ? pool.map(item=>`<button onclick="changeDeckCard('${esc(deckId)}','${esc(item.card.id)}',1);closeModal()"><strong>${esc(item.card.name)}</strong><span>${esc(item.card.number)} · ${esc(item.card.setName)} · você tem ${item.owned}</span></button>`).join('') : '<div class="empty">Nenhuma carta encontrada.</div>'}</div>`);
 }
 
 function option(value, label, selected) {

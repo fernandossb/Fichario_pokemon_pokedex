@@ -63,12 +63,12 @@ jobs:
         shell: bash
         run: |
           mkdir -p saida
-          cp app/build/outputs/apk/debug/app-debug.apk saida/Fichario-Pokemon-v5-Pokedex-Precos-Fotos.apk
+          cp app/build/outputs/apk/debug/app-debug.apk saida/Fichario-Pokemon-v6-Precos-Diagnostico-Decks.apk
 
       - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
-          name: Fichario-Pokemon-v5-Pokedex-Precos-Fotos
-          path: saida/Fichario-Pokemon-v5-Pokedex-Precos-Fotos.apk
+          name: Fichario-Pokemon-v6-Precos-Diagnostico-Decks
+          path: saida/Fichario-Pokemon-v6-Precos-Diagnostico-Decks.apk
           if-no-files-found: error
           retention-days: 30
