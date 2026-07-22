@@ -4,3 +4,9 @@ local.properties
 **/build/
 *.iml
 .DS_Store
+
+# Chaves e segredos de assinatura — nunca enviar ao GitHub
+*.jks
+*.keystore
+signing.properties
+SEGREDOS-GITHUB.txt

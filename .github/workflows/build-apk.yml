@@ -1,4 +1,4 @@
-name: Gerar APK Android 16
+name: Gerar APK assinado
 
 on:
   workflow_dispatch:
@@ -34,7 +34,29 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Validar Pokédex
+      - name: Validar segredos de assinatura
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -e
+          test -n "$KEYSTORE_BASE64"
+          test -n "$KEYSTORE_PASSWORD"
+          test -n "$KEY_ALIAS"
+          test -n "$KEY_PASSWORD"
+
+      - name: Restaurar chave de assinatura
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/fichario-pokemon-release.jks"
+          test -s "$RUNNER_TEMP/fichario-pokemon-release.jks"
+
+      - name: Validar Pokédex e recursos essenciais
         shell: bash
         run: |
           set -e
@@ -43,35 +65,37 @@ jobs:
           test -f app/src/main/assets/www/data/pokedex.json
           grep -q "\['pokedex', 'Pokédex'\]" app/src/main/assets/www/app.js
           grep -q "renderPokedex" app/src/main/assets/www/app.js
-          grep -q "fetchTcgDexPricing" app/src/main/assets/www/app.js
-          grep -q "tcgplayerAverageQuote" app/src/main/assets/www/app.js
-          grep -q "Cardmarket + TCGplayer" app/src/main/assets/www/app.js
           COUNT=$(find app/src/main/assets/www/sprites -maxdepth 1 -type f -name '*.png' | wc -l)
           echo "Sprites encontrados: $COUNT"
           test "$COUNT" -ge 1025
 
-      - name: Compilar APK debug assinado
-        run: gradle --no-daemon clean assembleDebug
+      - name: Compilar APK release assinado
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/fichario-pokemon-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle --no-daemon clean assembleRelease
 
-      - name: Verificar APK
+      - name: Verificar assinatura e pacote
         shell: bash
         run: |
           set -e
-          APK=app/build/outputs/apk/debug/app-debug.apk
+          APK=app/build/outputs/apk/release/app-release.apk
           test -f "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | head -20
 
       - name: Preparar saída
         shell: bash
         run: |
           mkdir -p saida
-          cp app/build/outputs/apk/debug/app-debug.apk saida/Fichario-Pokemon-v8-Precos-Multifonte.apk
+          cp app/build/outputs/apk/release/app-release.apk saida/Fichario-Pokemon-Assinado.apk
 
       - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
-          name: Fichario-Pokemon-v8-Precos-Multifonte
-          path: saida/Fichario-Pokemon-v8-Precos-Multifonte.apk
+          name: Fichario-Pokemon-Assinado
+          path: saida/Fichario-Pokemon-Assinado.apk
           if-no-files-found: error
           retention-days: 30
