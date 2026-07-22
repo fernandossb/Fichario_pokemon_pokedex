@@ -1,0 +1,33 @@
+workflows:
+  android-debug-apk:
+    name: Fichário Pokémon — APK Android 16
+    max_build_duration: 30
+    instance_type: linux_x2
+    environment:
+      java: 17
+      vars:
+        GRADLE_VERSION: "8.9"
+    scripts:
+      - name: Validar Pokédex
+        script: |
+          test -f app/src/main/assets/www/data/pokedex.json
+          test -f app/src/main/assets/www/app.js
+          grep -q "\['pokedex', 'Pokédex'\]" app/src/main/assets/www/app.js
+          COUNT=$(find app/src/main/assets/www/sprites -maxdepth 1 -name '*.png' | wc -l)
+          echo "Sprites encontrados: $COUNT"
+          test "$COUNT" -ge 1025
+      - name: Instalar Gradle
+        script: |
+          wget -q https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip
+          unzip -q gradle-${GRADLE_VERSION}-bin.zip
+          export PATH="$CM_BUILD_DIR/gradle-${GRADLE_VERSION}/bin:$PATH"
+          gradle --version
+      - name: Compilar APK debug assinado
+        script: |
+          export PATH="$CM_BUILD_DIR/gradle-${GRADLE_VERSION}/bin:$PATH"
+          gradle --no-daemon clean assembleDebug
+          mkdir -p saida
+          cp app/build/outputs/apk/debug/app-debug.apk saida/Fichario-Pokemon-Pokedex-Android16.apk
+    artifacts:
+      - saida/Fichario-Pokemon-Pokedex-Android16.apk
+      - app/build/outputs/logs/*.txt

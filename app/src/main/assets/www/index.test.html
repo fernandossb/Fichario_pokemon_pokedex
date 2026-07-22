@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="theme-color" content="#0b2d5c">
+  <title>Fichário Pokémon BR</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="loading" class="loading-screen">
+    <div class="pokeball-loader" aria-hidden="true"></div>
+    <strong>Preparando o Fichário Pokémon...</strong>
+    <span>Carregando catálogo, coleção e Pokédex.</span>
+  </div>
+
+  <div id="app" class="app hidden">
+    <header class="app-header">
+      <div class="kicker">POKÉMON TCG BRASIL</div>
+      <div class="header-row">
+        <div>
+          <h1>Fichário digital</h1>
+          <p id="header-status">Coleção local protegida</p>
+        </div>
+        <button class="header-icon" onclick="openBackupPanel()" aria-label="Backup">⋮</button>
+      </div>
+    </header>
+
+    <nav id="tabs" class="tabs" aria-label="Navegação principal"></nav>
+    <main id="content" class="content" aria-live="polite"></main>
+  </div>
+
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-backdrop" onclick="closeModal()"></div>
+    <section id="modal-content" class="modal-sheet"></section>
+  </div>
+
+  <script>
+window.Android={toast:(m)=>{window.__TOASTS=(window.__TOASTS||[]).concat(m)},getTopInsetCss:()=>0,getBottomInsetCss:()=>0};
+const __realFetch=window.fetch.bind(window);
+window.fetch=async function(url,opts){ const u=String(url);
+ if(u.includes('api.tcgdex.net/v2/pt/cards/')) return new Response(JSON.stringify({id:'sv03.5-001',localId:'001',name:'Bulbasaur',category:'Pokemon',image:'https://assets.tcgdex.net/pt/sv/sv03.5/001',set:{id:'sv03.5',name:'151'},dexId:[1],variants:{normal:true,reverse:true,holo:false},pricing:{cardmarket:{unit:'EUR',avg:2.5,'avg-holo':5.0,updated:'2026-07-21T00:00:00Z'}}}),{status:200,headers:{'Content-Type':'application/json'}});
+ if(u.includes('api.frankfurter.dev/v2/rate/EUR/BRL')) return new Response(JSON.stringify({rate:6,date:'2026-07-21'}),{status:200,headers:{'Content-Type':'application/json'}});
+ if(u.includes('api.frankfurter.dev/v2/rate/USD/BRL')) return new Response(JSON.stringify({rate:5.5,date:'2026-07-21'}),{status:200,headers:{'Content-Type':'application/json'}});
+ return __realFetch(url,opts); };
+</script>
+  <script src="data/catalog-data.js"></script>
+  <script src="data/pokedex-data.js"></script>
+  <script src="data/collection-seed-data.js"></script>
+  <script src="app.js"></script>
+<script>
+setTimeout(()=>{
+  try {
+    openCard('sv03.5-001');
+    setTimeout(()=>{
+      const price=document.querySelector('.automatic-price-card strong')?.textContent||'';
+      const tabs=[...document.querySelectorAll('.tab')].map(x=>x.textContent).join('|');
+      document.body.dataset.testResult=(price.includes('15,00') && tabs.includes('Pokédex'))?'PASS':'FAIL:'+price+':'+tabs;
+    },1600);
+  } catch(e){document.body.dataset.testResult='ERROR:'+e.message}
+},500);
+</script>
+</body>
+</html>

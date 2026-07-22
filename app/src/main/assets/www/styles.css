@@ -1,0 +1,267 @@
+:root {
+  --navy: #0b2d5c;
+  --navy-deep: #071f41;
+  --blue: #1767d2;
+  --sky: #b7d7ff;
+  --yellow: #ffd84d;
+  --cream: #fff8dc;
+  --surface: #ffffff;
+  --ink: #14233c;
+  --muted: #64748b;
+  --line: #d8e1ee;
+  --success: #18864b;
+  --danger: #c23b3b;
+  --shadow: 0 8px 22px rgba(10, 35, 75, .12);
+  --safe-top: 0px;
+  --safe-bottom: 0px;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--ink);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; background: var(--cream); }
+body { padding-top: var(--safe-top); padding-bottom: var(--safe-bottom); -webkit-tap-highlight-color: transparent; }
+body::before { content: ''; position: fixed; z-index: 100; top: 0; left: 0; right: 0; height: var(--safe-top); background: var(--navy-deep); }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+.hidden { display: none !important; }
+
+.loading-screen {
+  min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 12px; padding: 28px; text-align: center; color: #58709c;
+}
+.loading-screen strong { color: var(--navy); font-size: 19px; }
+.loading-screen span { font-size: 14px; }
+.pokeball-loader {
+  width: 58px; height: 58px; border: 7px solid var(--blue); border-right-color: transparent;
+  border-radius: 50%; animation: spin .85s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.app-header {
+  position: sticky; top: var(--safe-top); z-index: 20; color: white; padding: 15px 18px 14px;
+  background: linear-gradient(145deg, var(--navy-deep), var(--navy));
+  border-bottom: 4px solid var(--yellow);
+}
+.kicker { color: var(--yellow); font-weight: 900; font-size: 11px; letter-spacing: .08em; }
+.header-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.header-row h1 { margin: 2px 0 0; font-size: 28px; line-height: 1.12; }
+.header-row p { margin: 4px 0 0; color: var(--sky); font-size: 13px; }
+.header-icon { width: 43px; height: 43px; border: 1px solid #5d7fb1; border-radius: 50%; background: #123d76; color: white; font-size: 25px; }
+
+.tabs {
+  position: sticky; top: calc(var(--safe-top) + 112px); z-index: 19; display: flex; gap: 8px; overflow-x: auto;
+  padding: 10px 16px 12px; background: var(--navy); scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  flex: 0 0 auto; border: 1px solid #7e9bc3; border-radius: 9px; background: white;
+  color: #536987; padding: 9px 13px; font-weight: 800; min-height: 42px;
+}
+.tab.active { background: var(--yellow); border-color: var(--yellow); color: var(--ink); }
+
+.content { min-height: calc(100vh - 175px); padding: 16px 16px 50px; }
+.screen { max-width: 920px; margin: 0 auto; }
+.screen-title { margin: 2px 0 4px; color: var(--navy); font-size: 24px; }
+.screen-subtitle { margin: 0 0 16px; color: var(--muted); font-size: 14px; line-height: 1.45; }
+.section-title { margin: 24px 0 11px; color: var(--navy); font-size: 19px; }
+
+.stats-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+.stat-card { background: white; border: 1px solid var(--line); border-top: 5px solid var(--blue); border-radius: 12px; padding: 16px; box-shadow: var(--shadow); }
+.stat-card.wide { grid-column: 1 / -1; border-top-color: var(--yellow); }
+.stat-value { display: block; color: var(--navy); font-size: 30px; font-weight: 950; }
+.stat-label { color: var(--muted); font-size: 13px; font-weight: 750; }
+
+.toolbar, .filter-grid { display: grid; gap: 10px; margin-bottom: 13px; }
+.filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.field { width: 100%; min-height: 48px; border: 1px solid #b8c7dc; border-radius: 10px; background: white; color: var(--ink); padding: 11px 12px; outline: none; }
+.field:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(23, 103, 210, .13); }
+.search { padding-left: 14px; }
+.chips { display: flex; gap: 7px; overflow-x: auto; padding: 1px 0 4px; scrollbar-width: none; }
+.chip { flex: 0 0 auto; border: 1px solid #b8c7dc; border-radius: 999px; background: white; color: #526680; padding: 8px 12px; font-weight: 800; font-size: 13px; }
+.chip.active { background: var(--blue); border-color: var(--blue); color: white; }
+
+.panel { background: white; border: 1px solid var(--line); border-radius: 12px; padding: 14px; box-shadow: var(--shadow); }
+.empty { padding: 34px 18px; text-align: center; color: var(--muted); background: rgba(255,255,255,.72); border: 1px dashed #b7c5d9; border-radius: 12px; }
+.empty strong { display: block; color: var(--navy); margin-bottom: 6px; }
+
+.card-list { display: grid; gap: 10px; }
+.card-row {
+  display: grid; grid-template-columns: 74px minmax(0,1fr); gap: 12px; position: relative;
+  min-height: 118px; padding: 10px; background: white; border: 1px solid var(--line);
+  border-radius: 12px; box-shadow: 0 3px 12px rgba(10,35,75,.08); transition: opacity .2s;
+}
+.card-row.missing, .pokemon-tile.missing { opacity: .38; }
+.card-thumb { width: 74px; height: 103px; border-radius: 7px; background: #e8eef7; object-fit: cover; align-self: start; }
+.card-placeholder { width: 74px; height: 103px; border-radius: 7px; display: grid; place-items: center; background: linear-gradient(145deg,#dbe9fb,#f5f8fc); color: var(--navy); font-weight: 900; font-size: 12px; }
+.card-main { min-width: 0; }
+.card-name { margin: 1px 0 5px; color: var(--navy); font-weight: 900; font-size: 16px; }
+.card-meta { color: var(--muted); font-size: 12px; line-height: 1.4; }
+.badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.badge { display: inline-flex; align-items: center; min-height: 25px; border-radius: 999px; background: #eef4fb; color: #48617f; padding: 4px 8px; font-size: 11px; font-weight: 850; }
+.badge.owned { background: #ddf6e7; color: #146d3d; }
+.badge.yellow { background: #fff3bd; color: #765900; }
+.quantity-control { display: flex; align-items: center; gap: 7px; margin-top: 10px; }
+.qty-btn { width: 36px; height: 34px; border: 0; border-radius: 8px; background: var(--navy); color: white; font-size: 20px; font-weight: 900; }
+.qty-btn.add { background: var(--blue); }
+.qty-value { min-width: 45px; text-align: center; font-weight: 900; }
+
+.load-more, .primary-btn, .secondary-btn, .danger-btn {
+  width: 100%; min-height: 47px; border-radius: 10px; padding: 11px 14px; font-weight: 900;
+}
+.load-more, .primary-btn { border: 0; background: var(--blue); color: white; }
+.secondary-btn { border: 1px solid #9eb1ca; background: white; color: var(--navy); }
+.danger-btn { border: 1px solid #e4aaaa; background: #fff1f1; color: var(--danger); }
+.load-more { margin-top: 13px; }
+
+.set-list { display: grid; gap: 10px; }
+.set-card { width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 12px; background: white; padding: 14px; box-shadow: 0 3px 12px rgba(10,35,75,.07); }
+.set-title-row { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.set-name { color: var(--navy); font-weight: 900; }
+.set-count { color: var(--blue); font-weight: 900; white-space: nowrap; }
+.progress { height: 9px; overflow: hidden; margin: 10px 0 6px; border-radius: 999px; background: #e8eef6; }
+.progress > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg,var(--blue),#50a1ff); }
+
+.region-section { margin-top: 20px; }
+.region-heading { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 10px; }
+.region-heading h3 { margin: 0; color: var(--navy); font-size: 20px; }
+.region-heading span { color: var(--muted); font-size: 12px; }
+.pokemon-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 9px; }
+.pokemon-tile {
+  min-width: 0; min-height: 143px; border: 1px solid #c9d6e8; border-radius: 13px;
+  background: white; padding: 7px 5px 9px; text-align: center; position: relative;
+  box-shadow: 0 3px 11px rgba(10,35,75,.07); transition: opacity .2s, transform .15s;
+}
+.pokemon-tile:active { transform: scale(.97); }
+.pokemon-tile img { display: block; width: 82px; height: 82px; margin: 0 auto 2px; object-fit: contain; }
+.pokemon-number { display: block; color: #76869d; font-size: 10px; font-weight: 800; }
+.pokemon-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--navy); font-size: 12px; font-weight: 900; }
+.pokemon-owned-count { position: absolute; top: 6px; right: 6px; min-width: 23px; height: 23px; display: grid; place-items: center; border-radius: 999px; background: var(--success); color: white; font-size: 10px; font-weight: 900; }
+
+.pokemon-hero { display: grid; grid-template-columns: 112px minmax(0,1fr); gap: 14px; align-items: center; margin-bottom: 16px; }
+.pokemon-hero img { width: 112px; height: 112px; object-fit: contain; background: white; border: 1px solid var(--line); border-radius: 50%; }
+.pokemon-hero h2 { margin: 2px 0 5px; color: var(--navy); }
+.back-btn { border: 0; background: transparent; color: var(--blue); padding: 3px 0 12px; font-weight: 900; }
+
+.modal { position: fixed; inset: 0; z-index: 50; display: flex; align-items: flex-end; }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(4,18,40,.62); }
+.modal-sheet { position: relative; width: 100%; max-height: 88vh; overflow-y: auto; background: var(--cream); border-radius: 20px 20px 0 0; padding: 18px 17px calc(26px + env(safe-area-inset-bottom)); box-shadow: 0 -12px 32px rgba(0,0,0,.22); }
+.modal-close { float: right; width: 39px; height: 39px; border: 0; border-radius: 50%; background: white; color: var(--navy); font-size: 23px; }
+.modal-card-image { display: block; width: min(250px,72vw); max-height: 350px; object-fit: contain; margin: 4px auto 14px; border-radius: 12px; }
+.modal h2 { color: var(--navy); margin: 7px 45px 4px 0; }
+.modal-actions { display: grid; gap: 9px; margin-top: 16px; }
+
+.backup-actions { display: grid; gap: 10px; margin-top: 16px; }
+.notice { margin: 13px 0; border-left: 5px solid var(--yellow); background: white; border-radius: 8px; padding: 11px 12px; color: #53647b; font-size: 13px; line-height: 1.45; }
+.deck-row { display: flex; gap: 9px; margin-bottom: 14px; }
+.deck-row .field { flex: 1; }
+.deck-row button { width: auto; min-width: 95px; }
+
+@media (min-width: 620px) {
+  .content { padding-left: 24px; padding-right: 24px; }
+  .pokemon-grid { grid-template-columns: repeat(5, minmax(0,1fr)); }
+  .card-list { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .filter-grid { grid-template-columns: repeat(4, minmax(0,1fr)); }
+}
+
+/* Checkpoint 2 — cadastro completo de cartas */
+button, input, select, textarea { font: inherit; }
+.badge.purple { background: #eee7ff; color: #5a3b9c; }
+.registration-header {
+  display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 13px; align-items: start;
+  clear: both; margin: 4px 0 16px;
+}
+.registration-card-image, .registration-placeholder {
+  width: 92px; height: 128px; border-radius: 9px; object-fit: cover; background: #e6edf7;
+  box-shadow: 0 5px 15px rgba(7,31,65,.14);
+}
+.registration-placeholder { display: grid; place-items: center; color: var(--navy); font-weight: 950; }
+.registration-kicker { color: var(--blue); font-size: 10px; font-weight: 950; letter-spacing: .08em; }
+.registration-header h2 { margin: 4px 42px 4px 0; font-size: 21px; }
+.registration-section {
+  margin-top: 13px; padding: 14px; background: white; border: 1px solid var(--line);
+  border-radius: 13px; box-shadow: 0 3px 14px rgba(10,35,75,.07);
+}
+.registration-section h3 { margin: 0 0 12px; color: var(--navy); font-size: 17px; }
+.registration-section-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.registration-section-title strong { display: block; color: var(--navy); font-size: 16px; }
+.registration-section-title span { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.mini-btn { flex: 0 0 auto; border: 0; border-radius: 9px; background: var(--blue); color: white; padding: 8px 10px; font-weight: 900; }
+.variant-strip { display: flex; gap: 7px; overflow-x: auto; margin-top: 12px; padding-bottom: 3px; scrollbar-width: none; }
+.variant-chip { flex: 0 0 auto; max-width: 260px; border: 1px solid #b7c7dd; border-radius: 999px; background: #f8fbff; color: #506681; padding: 8px 11px; font-size: 12px; font-weight: 850; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.variant-chip.active { background: var(--navy); border-color: var(--navy); color: white; }
+.notice.compact { margin: 11px 0 0; padding: 9px 10px; }
+.registration-grid { display: grid; gap: 10px; }
+.registration-grid.two-columns { grid-template-columns: repeat(2, minmax(0,1fr)); }
+.registration-field { display: block; min-width: 0; }
+.registration-field > span { display: block; margin: 0 0 5px; color: #465a75; font-size: 12px; font-weight: 900; }
+.registration-field .field { min-height: 44px; }
+.read-only-field { min-height: 44px; display: flex; flex-direction: column; justify-content: center; border: 1px solid #d3ddea; border-radius: 10px; background: #f3f6fa; color: var(--navy); padding: 7px 11px; font-weight: 900; }
+.read-only-field small { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; font-weight: 700; }
+.toggle-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; margin: 12px 0; }
+.toggle-card { min-height: 48px; display: flex; align-items: center; gap: 8px; border: 1px solid #c7d3e3; border-radius: 10px; background: #f9fbfe; padding: 8px 10px; }
+.toggle-card input { position: absolute; opacity: 0; pointer-events: none; }
+.toggle-ui { width: 36px; height: 21px; flex: 0 0 auto; position: relative; border-radius: 999px; background: #b5c1d0; transition: background .15s; }
+.toggle-ui::after { content: ''; position: absolute; top: 3px; left: 3px; width: 15px; height: 15px; border-radius: 50%; background: white; transition: transform .15s; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+.toggle-card input:checked + .toggle-ui { background: var(--success); }
+.toggle-card input:checked + .toggle-ui::after { transform: translateX(15px); }
+.toggle-card strong { color: #455873; font-size: 12px; }
+.notes-field { min-height: 92px; resize: vertical; }
+
+@media (max-width: 410px) {
+  .registration-grid.two-columns { grid-template-columns: 1fr; }
+}
+
+/* Checkpoint 3 — atualização segura das coleções */
+.catalog-update-card {
+  margin: 0 0 14px; padding: 14px; border: 1px solid #aac3e6; border-radius: 14px;
+  background: linear-gradient(145deg, #ffffff, #edf5ff); box-shadow: 0 5px 18px rgba(7,31,65,.08);
+}
+.catalog-update-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.catalog-update-heading strong { display: block; color: var(--navy); font-size: 17px; }
+.catalog-update-heading span:not(.online-badge) { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; line-height: 1.35; }
+.online-badge { flex: 0 0 auto; border-radius: 999px; background: #dff5e8; color: #17673a; padding: 6px 8px; font-size: 9px; font-weight: 950; }
+.catalog-update-card p { margin: 11px 0; color: #51647e; font-size: 12px; line-height: 1.45; }
+.catalog-update-card .primary-btn { width: 100%; }
+.catalog-update-card .primary-btn:disabled { opacity: .62; }
+.catalog-progress { margin: 10px 0; }
+.catalog-progress .progress { margin-bottom: 5px; }
+.catalog-progress small, .catalog-last-result { color: #5c6f88; font-size: 10px; font-weight: 800; }
+.catalog-last-result { margin-top: 9px; text-align: center; }
+
+
+/* Checkpoint 4 — preços automáticos */
+.badge.price { background: #e3f6ee; color: #12643b; }
+.price-update-card {
+  margin: 14px 0; padding: 14px; border: 1px solid #9fcdb7; border-radius: 14px;
+  background: linear-gradient(145deg, #ffffff, #eefaf4); box-shadow: 0 5px 18px rgba(7,31,65,.08);
+}
+.price-update-card p { margin: 11px 0; color: #51647e; font-size: 12px; line-height: 1.45; }
+.price-update-card .primary-btn:disabled { opacity: .62; }
+.automatic-price-card {
+  min-height: 80px; display: flex; flex-direction: column; justify-content: center; gap: 3px;
+  border: 1px solid #a9cbb9; border-radius: 11px; background: #f1fbf6; padding: 9px 10px;
+}
+.automatic-price-card strong { color: #12643b; font-size: 18px; font-weight: 950; }
+.automatic-price-card span { color: #465d73; font-size: 10px; font-weight: 800; line-height: 1.35; }
+.automatic-price-card small { color: var(--muted); font-size: 9px; line-height: 1.35; }
+.automatic-price-card.empty-price { border-color: #c8d4e3; background: #f5f8fc; }
+.automatic-price-card.empty-price strong, .automatic-price-card.loading-price strong { color: var(--navy); font-size: 14px; }
+.price-refresh-btn {
+  align-self: flex-start; margin-top: 5px; border: 0; border-radius: 8px; background: var(--navy); color: white;
+  min-height: 30px; padding: 6px 9px; font-size: 10px; font-weight: 900;
+}
+.price-refresh-btn:disabled { opacity: .6; }
+
+/* Checkpoint 4.3 — validação Cardmarket */
+.automatic-price-card.review-price { border-color: #e5b94f; background: #fff9e9; }
+.automatic-price-card.review-price strong { color: #805600; }
+.price-verification { display: block; margin-top: 4px; padding: 6px 7px; border-radius: 8px; font-weight: 850; }
+.price-verification.verified { background: #def5e7; color: #17673a; }
+.price-verification.review { background: #fff0bf; color: #765000; }
+.price-verification.user-validated { background: #e7ecff; color: #2947a3; }
+.price-validate-btn {
+  align-self: flex-start; margin-top: 5px; border: 1px solid #b98500; border-radius: 8px;
+  background: #fff3c7; color: #684700; min-height: 30px; padding: 6px 9px;
+  font-size: 10px; font-weight: 950;
+}
