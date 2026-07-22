@@ -20,6 +20,7 @@ const PRICE_LOGIC_VERSION = 9;
 const PRICE_CACHE_TTL = 24 * 60 * 60 * 1000;
 const FX_CACHE_TTL = 24 * 60 * 60 * 1000;
 const TCGDEX_API_BASE = 'https://api.tcgdex.net/v2/pt';
+const TCGDEX_API_FALLBACK = 'https://api.tcgdex.net/v2/en';
 const FX_API_BASE = 'https://api.frankfurter.dev/v2';
 const LIGA_POKEMON_BASES = ['https://www.ligapokemon.com.br/', 'https://ligapokemon.com.br/'];
 const TAB_ITEMS = [
@@ -367,6 +368,90 @@ function ligaPokemonAverageQuote(liga, kind) {
   };
 }
 
+
+async function fetchTcgDexPricing(cardId) {
+  const card = cardMap.get(cardId);
+  if (!card) throw new Error('Carta não encontrada no catálogo local.');
+  const errors = [];
+  for (const base of [TCGDEX_API_BASE, TCGDEX_API_FALLBACK]) {
+    try {
+      const detail = await fetchJsonWithTimeout(`${base}/cards/${encodeURIComponent(card.id)}`, 25000);
+      if (!detail || String(detail.id || '') !== String(card.id)) throw new Error('identificador divergente');
+      return {
+        detail,
+        identity: cardmarketIdentityFromDetail(detail),
+        cardmarket: detail?.pricing?.cardmarket || null,
+        tcgplayer: detail?.pricing?.tcgplayer || null,
+        locale: base.endsWith('/en') ? 'en' : 'pt',
+        fetchedAt: Date.now(),
+      };
+    } catch (error) {
+      errors.push(`${base.endsWith('/en') ? 'TCGdex EN' : 'TCGdex PT'}: ${String(error?.message || error)}`);
+    }
+  }
+  throw new Error(errors.join(' | ') || 'TCGdex indisponível.');
+}
+
+function exactRemoteValidation(card, remote, kind) {
+  const checks = [
+    { key: 'id', label: 'identificador exato', ok: String(remote?.id || '') === String(card?.id || '') },
+    { key: 'set', label: 'coleção exata', ok: String(remote?.setId || '') === String(card?.setId || '') },
+    { key: 'number', label: 'número exato', ok: normalizeCollectorId(remote?.localId) === normalizeCollectorId(card?.localId) },
+    { key: 'name', label: 'nome da carta', ok: normalize(remote?.name) === normalize(card?.name) },
+  ];
+  const variants = remote?.variants || {};
+  const finishAvailable = kind === 'normal'
+    ? variants.normal !== false
+    : kind === 'reverse'
+      ? variants.reverse === true || variants.holo === true
+      : variants.holo === true || variants.reverse === true;
+  checks.push({ key: 'finish', label: 'acabamento disponível', ok: finishAvailable });
+  const failed = checks.filter(item => !item.ok);
+  return { verified: failed.length === 0, confidence: failed.length === 0 ? 'verified' : 'review', checks, reasons: failed.map(item => item.label) };
+}
+
+function tcgplayerMetric(tcgplayer, kind) {
+  const variant = tcgplayerVariant(tcgplayer, kind);
+  if (!variant || typeof variant !== 'object') return null;
+  const candidates = [
+    ['marketPrice', 'preço de mercado'],
+    ['midPrice', 'preço médio'],
+    ['directLowPrice', 'menor preço direto'],
+    ['lowPrice', 'menor oferta'],
+  ];
+  for (const [field, label] of candidates) {
+    if (hasFiniteNumber(variant[field]) && Number(variant[field]) >= 0) return { field, label, value: Number(variant[field]) };
+  }
+  return null;
+}
+
+function tcgplayerAverageQuote(tcgplayer, kind, card, remoteIdentity) {
+  if (!tcgplayer || !card || !remoteIdentity) return null;
+  const metric = tcgplayerMetric(tcgplayer, kind);
+  if (!metric) return null;
+  const validation = exactRemoteValidation(card, remoteIdentity, kind);
+  const finishLabel = kind === 'reverse' ? 'reversa' : kind === 'holo' ? 'holográfica/foil' : 'comum';
+  return {
+    value: metric.value,
+    currency: tcgplayer.unit || 'USD',
+    label: `TCGplayer ${metric.label} · ${finishLabel}`,
+    source: 'tcgplayer',
+    provider: 'TCGplayer via TCGdex',
+    updated: tcgplayer.updated || null,
+    confidence: validation.confidence,
+    verified: validation.verified,
+    validation,
+    fingerprint: [card.id, kind, metric.field, metric.value, tcgplayer.unit || 'USD', tcgplayer.updated || ''].join('|'),
+  };
+}
+
+function quoteInBrl(quote, fetchedAt) {
+  if (!quote || !hasFiniteNumber(quote.value)) return null;
+  const rate = fxRate(quote.currency || 'BRL');
+  if (!hasFiniteNumber(rate)) return null;
+  return { ...quote, brl: Math.round(Number(quote.value) * Number(rate) * 100) / 100, rate: Number(rate), fetchedAt: fetchedAt || Date.now(), usable: quote.confidence === 'verified' };
+}
+
 function normalizeCollectorId(value) {
   const raw = String(value ?? '').trim().toUpperCase().replace(/\s+/g, '');
   const match = raw.match(/^([A-Z]*)(\d+)$/);
@@ -476,7 +561,7 @@ function cardmarketAverageQuote(cardmarket, kind, card, remoteIdentity) {
   if (!cardmarket || typeof cardmarket !== 'object' || !card || !remoteIdentity) return null;
   const metric = cardmarketMetric(cardmarket, kind);
   if (!metric) return null;
-  const validation = cardmarketValidation(card, remoteIdentity, kind);
+  const validation = exactRemoteValidation(card, remoteIdentity, kind);
   const finishLabel = kind === 'reverse' ? 'reversa' : kind === 'holo' ? 'holográfica/foil' : 'comum';
   const fingerprint = [
     card.id, kind, metric.field, metric.value, cardmarket.unit || 'EUR', cardmarket.updated || '',
@@ -503,125 +588,52 @@ function fxRate(currency) {
   return hasFiniteNumber(item?.rate) ? Number(item.rate) : null;
 }
 
-function tcgplayerMarketQuote(tcgplayer, kind, card, remoteIdentity) {
-  if (!tcgplayer || typeof tcgplayer !== 'object' || !card || !remoteIdentity) return null;
-  const variant = tcgplayerVariant(tcgplayer, kind);
-  if (!variant) return null;
-  const value = firstFinite(variant.marketPrice, variant.midPrice, variant.directLowPrice, variant.lowPrice);
-  if (!hasFiniteNumber(value)) return null;
-  const validation = cardmarketValidation(card, remoteIdentity, kind);
-  const finishLabel = kind === 'reverse' ? 'reversa' : kind === 'holo' ? 'holográfica' : 'comum';
-  return {
-    value: Number(value),
-    currency: tcgplayer.unit || 'USD',
-    label: `TCGplayer · preço de mercado ${finishLabel}`,
-    source: 'tcgplayer',
-    provider: 'TCGplayer via TCGdex',
-    updated: tcgplayer.updated || null,
-    confidence: validation.confidence,
-    verified: validation.verified,
-    validation,
-    fingerprint: [card.id, kind, value, tcgplayer.updated || '', 'tcgplayer'].join('|'),
-  };
-}
-
-function convertedQuote(quote, fetchedAt) {
-  if (!quote || !hasFiniteNumber(quote.value)) return null;
-  const rate = fxRate(quote.currency || 'BRL');
-  if (!hasFiniteNumber(rate)) return null;
-  return {
-    ...quote,
-    brl: Math.round(Number(quote.value) * Number(rate) * 100) / 100,
-    rate: Number(rate),
-    fetchedAt: fetchedAt || quote.updated || Date.now(),
-  };
-}
-
 function automaticPriceQuote(cardId, finish = 'comum') {
   const cached = priceCache[cardId];
   const card = cardMap.get(cardId);
   if (!cached || !card) return null;
   const kind = finishKind(finish);
-  const candidates = [];
 
-  const liga = ligaPokemonAverageQuote(cached.ligaPokemon, kind);
-  if (liga) {
-    candidates.push({
-      ...liga,
-      brl: Number(liga.value),
+  const ligaQuote = ligaPokemonAverageQuote(cached.ligaPokemon, kind);
+  if (ligaQuote) {
+    return {
+      ...ligaQuote,
+      brl: ligaQuote.value,
       rate: 1,
-      fetchedAt: cached.fetchedAt || liga.updated || Date.now(),
-      confidence: 'verified',
-      verified: true,
-      usable: true,
-      fingerprint: [card.id, kind, liga.value, 'ligapokemon'].join('|'),
+      fetchedAt: cached.fetchedAt || null,
+      confidence: 'verified', verified: true, usable: true,
+      fingerprint: [card.id, card.setId, card.localId, kind, ligaQuote.value, 'liga'].join('|'),
       validation: { reasons: [], checks: [
-        { key: 'identity', label: 'carta identificada por coleção e número', ok: true },
-        { key: 'finish', label: 'acabamento selecionado', ok: true },
+        { key: 'local-id', label: 'identificação pelo catálogo local', ok: true },
+        { key: 'set', label: 'coleção exata', ok: true },
+        { key: 'number', label: 'número de colecionador exato', ok: true },
       ] },
-    });
-  }
-
-  const remoteIdentity = cached.tcgdex?.identity || null;
-  const cm = convertedQuote(cardmarketAverageQuote(cached.tcgdex?.pricing?.cardmarket, kind, card, remoteIdentity), cached.fetchedAt);
-  if (cm) candidates.push({ ...cm, usable: true });
-  const tcg = convertedQuote(tcgplayerMarketQuote(cached.tcgdex?.pricing?.tcgplayer, kind, card, remoteIdentity), cached.fetchedAt);
-  if (tcg) candidates.push({ ...tcg, usable: true });
-
-  if (!candidates.length) return null;
-  const ligaCandidate = candidates.find(item => item.source === 'ligapokemon');
-  if (ligaCandidate) {
-    const supporting = candidates.filter(item => item !== ligaCandidate);
-    return {
-      ...ligaCandidate,
-      label: supporting.length ? `Liga Pokémon + ${supporting.length} fonte${supporting.length > 1 ? 's' : ''} de comparação` : ligaCandidate.label,
-      provider: supporting.length ? `Liga Pokémon; ${supporting.map(item => item.provider).join('; ')}` : ligaCandidate.provider,
-      fingerprint: [ligaCandidate.fingerprint, ...supporting.map(item => item.fingerprint)].join('||'),
-      validation: {
-        reasons: [],
-        checks: [
-          ...(ligaCandidate.validation?.checks || []),
-          ...supporting.map(item => ({ key: item.source, label: `${item.provider} disponível para comparação`, ok: true })),
-        ],
-      },
     };
   }
 
-  if (candidates.length === 1) {
-    const only = candidates[0];
+  const remote = cached.tcgDexIdentity;
+  const cm = quoteInBrl(cardmarketAverageQuote(cached.cardmarket, kind, card, remote), cached.fetchedAt);
+  const tp = quoteInBrl(tcgplayerAverageQuote(cached.tcgplayer, kind, card, remote), cached.fetchedAt);
+  const verified = [cm, tp].filter(item => item?.verified && hasFiniteNumber(item.brl));
+  if (verified.length >= 2) {
+    const brl = Math.round((verified.reduce((sum, item) => sum + Number(item.brl), 0) / verified.length) * 100) / 100;
     return {
-      ...only,
-      confidence: only.verified ? 'verified' : 'review',
-      usable: true,
-      label: `${only.label} · convertido para reais`,
+      brl,
+      value: brl,
+      currency: 'BRL',
+      rate: 1,
+      label: `Média internacional · ${verified.map(item => item.source === 'cardmarket' ? 'Cardmarket' : 'TCGplayer').join(' + ')}`,
+      source: 'multifonte',
+      provider: 'TCGdex · múltiplos mercados',
+      fetchedAt: cached.fetchedAt || null,
+      confidence: 'verified', verified: true, usable: true,
+      fingerprint: [card.id, kind, ...verified.map(item => item.fingerprint)].join('|'),
+      validation: { reasons: [], checks: verified.flatMap(item => item.validation?.checks || []) },
     };
   }
-
-  const values = candidates.map(item => Number(item.brl)).filter(Number.isFinite).sort((a, b) => a - b);
-  const suggested = values.length % 2 ? values[(values.length - 1) / 2] : (values[values.length / 2 - 1] + values[values.length / 2]) / 2;
-  const min = values[0];
-  const max = values[values.length - 1];
-  const divergence = suggested > 0 ? (max - min) / suggested : 0;
-  const verified = candidates.every(item => item.verified !== false) && divergence <= 0.50;
-  return {
-    value: suggested,
-    currency: 'BRL',
-    brl: Math.round(suggested * 100) / 100,
-    rate: 1,
-    label: `Média de ${candidates.length} fontes internacionais`,
-    source: 'multi',
-    provider: candidates.map(item => item.provider).join(' + '),
-    fetchedAt: cached.fetchedAt || Date.now(),
-    confidence: verified ? 'verified' : 'review',
-    verified,
-    usable: true,
-    fingerprint: candidates.map(item => item.fingerprint).join('||'),
-    validation: {
-      reasons: verified ? [] : ['As fontes apresentaram valores muito diferentes.'],
-      checks: candidates.map(item => ({ key: item.source, label: `${item.provider}: ${money(item.brl)}`, ok: true })),
-    },
-  };
+  return verified[0] || cm || tp || null;
 }
+
 function legacyPriceQuote(cardId) {
   const value = entryFor(cardId).priceBrl;
   return hasFiniteNumber(value) ? { brl: Number(value), label: 'Preço antigo importado', legacy: true } : null;
@@ -677,9 +689,9 @@ function applyAutomaticPriceToVariant(cardId, variant) {
     || JSON.stringify(variant.automaticPriceValidationReasons || []) !== JSON.stringify(nextReasons)
     || JSON.stringify(variant.automaticPriceValidationChecks || []) !== JSON.stringify(nextChecks);
   variant.automaticEstimatedValue = nextValue;
-  variant.automaticPriceSource = quote.source || 'multi';
-  variant.automaticPriceLabel = quote.label || 'Preço de mercado';
-  variant.automaticPriceProvider = quote.provider || 'Fontes de mercado';
+  variant.automaticPriceSource = quote.source || 'ligapokemon';
+  variant.automaticPriceLabel = quote.label || 'Liga Pokémon';
+  variant.automaticPriceProvider = quote.provider || 'Marketplace Liga Pokémon';
   variant.automaticPriceOriginalValue = nullableNumber(quote.value);
   variant.automaticPriceCurrency = quote.currency || 'BRL';
   variant.automaticPriceUpdatedAt = nextUpdated;
@@ -749,46 +761,31 @@ async function loadFxRates(force = false) {
   return fxCache;
 }
 
-async function fetchTcgdexPricing(cardId) {
-  const card = cardMap.get(cardId);
-  if (!card) throw new Error('Carta não encontrada no catálogo local.');
-  const detail = await fetchJsonWithTimeout(`${TCGDEX_API_BASE}/cards/${encodeURIComponent(card.id)}`, 25000);
-  if (!detail || String(detail.id || '') !== String(card.id)) throw new Error('TCGdex retornou uma carta diferente.');
-  return {
-    identity: cardmarketIdentityFromDetail(detail),
-    pricing: detail.pricing && typeof detail.pricing === 'object' ? detail.pricing : {},
-    updated: detail.updated || null,
-    fetchedAt: Date.now(),
-  };
-}
-
 async function fetchCardPricing(cardId, force = false) {
   if (!force && priceCacheFresh(cardId)) return priceCache[cardId];
   if (priceRequests.has(cardId)) return priceRequests.get(cardId);
   const request = (async () => {
     const card = cardMap.get(cardId);
     if (!card) throw new Error('Carta não encontrada no catálogo local.');
-
-    await loadFxRates(false);
-    const [tcgdexResult, ligaResult] = await Promise.allSettled([
-      fetchTcgdexPricing(cardId),
+    try { await loadFxRates(false); } catch (_) {}
+    const [tcgResult, ligaResult] = await Promise.allSettled([
+      fetchTcgDexPricing(cardId),
       fetchLigaPokemonPricing(cardId),
     ]);
-    const tcgdex = tcgdexResult.status === 'fulfilled' ? tcgdexResult.value : null;
+    const tcg = tcgResult.status === 'fulfilled' ? tcgResult.value : null;
     const ligaPokemon = ligaResult.status === 'fulfilled' ? ligaResult.value : null;
     const errors = [];
-    if (!tcgdex) errors.push(`TCGdex: ${String(tcgdexResult.reason?.message || tcgdexResult.reason || 'indisponível')}`);
-    if (!ligaPokemon) errors.push(`Liga: ${String(ligaResult.reason?.message || ligaResult.reason || 'indisponível')}`);
-    if (!tcgdex && !ligaPokemon) throw new Error(errors.join(' | ') || 'Nenhuma fonte de preços respondeu.');
-
-    lastPriceDiagnostic = errors.join(' | ');
-    try { localStorage.setItem('fichario-price-last-diagnostic', lastPriceDiagnostic); } catch (_) {}
+    if (tcgResult.status === 'rejected') errors.push(String(tcgResult.reason?.message || tcgResult.reason));
+    if (ligaResult.status === 'rejected') errors.push(String(ligaResult.reason?.message || ligaResult.reason));
+    if (!ligaPokemon && !tcg?.cardmarket && !tcg?.tcgplayer) throw new Error(errors.join(' | ') || 'Nenhuma fonte retornou preço.');
     priceCache[cardId] = {
       logicVersion: PRICE_LOGIC_VERSION,
       fetchedAt: Date.now(),
       ligaPokemon,
-      tcgdex,
-      errors,
+      cardmarket: tcg?.cardmarket || null,
+      tcgplayer: tcg?.tcgplayer || null,
+      tcgDexIdentity: tcg?.identity || null,
+      diagnostics: errors,
       identity: { id: card.id, setId: card.setId, localId: card.localId, name: card.name },
     };
     savePriceCache();
@@ -797,6 +794,7 @@ async function fetchCardPricing(cardId, force = false) {
   priceRequests.set(cardId, request);
   return request;
 }
+
 function notify(message) {
   if (window.Android?.toast) window.Android.toast(message);
 }
@@ -1334,12 +1332,12 @@ function pricingPanel() {
   return `<section class="price-update-card">
     <div class="catalog-update-heading">
       <div><strong>Preços brasileiros</strong><span>${counts.priced} de ${counts.owned} cartas próprias com valor aceito${counts.pending ? ` · ${counts.pending} aguardando validação` : ''}${latest ? ` · última consulta ${esc(formatPriceDate(latest))}` : ''}</span></div>
-      <span class="online-badge">Liga Pokémon · identidade local</span>
+      <span class="online-badge">Liga + Cardmarket + TCGplayer</span>
     </div>
-    <p>Prioridade: valor manual → média da Liga Pokémon. A carta é identificada pelo catálogo local usando coleção e número; a Liga fornece somente o preço em reais.</p>
+    <p>Prioridade: valor manual → Liga Pokémon → média Cardmarket/TCGplayer via TCGdex. A identificação usa coleção e número exatos do catálogo local.</p>
     ${priceUpdating ? `<div class="catalog-progress"><div class="progress"><span style="width:${progress}%"></span></div><small>${esc(priceUpdateMessage || 'Consultando preços...')}</small></div>` : ''}
     <button class="primary-btn" ${priceUpdating ? 'disabled' : ''} onclick="startOwnedPriceUpdate()">${priceUpdating ? 'Atualizando...' : 'Atualizar preços da coleção'}</button>
-    ${priceUpdateFailures ? `<div class="catalog-last-result">${priceUpdateFailures} carta(s) não retornaram preço da Liga Pokémon nesta tentativa.</div>` : ''}
+    ${priceUpdateFailures ? `<div class="catalog-last-result">${priceUpdateFailures} carta(s) não retornaram preço em nenhuma fonte nesta tentativa.</div>` : ''}
   </section>`;
 }
 
@@ -1869,7 +1867,7 @@ function automaticPriceBox(cardId, finish = 'comum', variantId = '') {
     const verified = confidence === 'verified';
     const reasons = displayQuote.validation?.reasons || [];
     const statusHtml = verified
-      ? '<small class="price-verification verified">✓ Carta identificada pelo catálogo local; preço médio obtido na Liga Pokémon.</small>'
+      ? '<small class="price-verification verified">✓ Carta identificada por coleção e número; preço obtido em fonte validada.</small>'
       : userValidated
         ? '<small class="price-verification user-validated">✓ Correspondência confirmada manualmente por você.</small>'
         : `<small class="price-verification review">⚠ Necessita validação${reasons.length ? `: ${esc(reasons.join('; '))}` : ''}. Este valor ainda não entra no total da coleção.</small>`;
@@ -1881,7 +1879,7 @@ function automaticPriceBox(cardId, finish = 'comum', variantId = '') {
     return `<div class="automatic-price-card ${verified ? 'verified-price' : 'review-price'}">
       <strong>${esc(converted)}</strong>
       <span>${esc(source)}${original ? ` · ${esc(original)}` : ''}</span>
-      <small>${displayQuote.stored ? 'Valor salvo na carta' : 'Consulta Liga Pokémon'} ${esc(formatPriceDate(displayQuote.fetchedAt))}${displayQuote.rate != null ? ` · câmbio ${displayQuote.currency}/BRL ${Number(displayQuote.rate).toLocaleString('pt-BR', { maximumFractionDigits: 4 })}` : ''}</small>
+      <small>${displayQuote.stored ? 'Valor salvo na carta' : 'Consulta multifonte'} ${esc(formatPriceDate(displayQuote.fetchedAt))}${displayQuote.rate != null ? ` · câmbio ${displayQuote.currency}/BRL ${Number(displayQuote.rate).toLocaleString('pt-BR', { maximumFractionDigits: 4 })}` : ''}</small>
       ${statusHtml}
       ${validationButton}
       <button type="button" class="price-refresh-btn" ${loading ? 'disabled' : ''} onclick="event.preventDefault();event.stopPropagation();updateCardPrice('${esc(cardId)}', document.getElementById('regFinish')?.value || '${esc(finish)}', true)">${loading ? 'Consultando...' : 'Atualizar agora'}</button>
@@ -1889,8 +1887,8 @@ function automaticPriceBox(cardId, finish = 'comum', variantId = '') {
   }
   if (loading) return `<div class="automatic-price-card loading-price"><strong>Consultando Liga, Cardmarket e TCGplayer...</strong><span>Aguarde alguns segundos.</span></div>`;
   return `<div class="automatic-price-card empty-price">
-    <strong>Ainda sem preço da Liga Pokémon</strong>
-    <span>Ordem: valor manual → média da Liga Pokémon.</span>
+    <strong>Ainda sem preço nas fontes disponíveis</strong>
+    <span>Ordem: valor manual → Liga → Cardmarket/TCGplayer.</span>
     <button type="button" class="price-refresh-btn" onclick="event.preventDefault();event.stopPropagation();updateCardPrice('${esc(cardId)}', document.getElementById('regFinish')?.value || '${esc(finish)}', true)">Consultar preço</button>
   </div>`;
 }
@@ -1926,9 +1924,9 @@ async function updateCardPrice(cardId, finish = 'comum', force = false) {
     const quote = automaticPriceQuote(cardId, finish);
     notify(quote
       ? (quote.confidence === 'verified'
-        ? (saved ? 'Preço da Liga Pokémon salvo' : 'Preço da Liga Pokémon encontrado')
-        : 'Preço encontrado na Liga Pokémon')
-      : 'A Liga Pokémon não retornou preço para esta carta.');
+        ? (saved ? 'Preço multifonte salvo' : 'Preço multifonte encontrado')
+        : 'Preço encontrado em fonte externa')
+      : 'Nenhuma fonte retornou preço para esta carta.');
   } catch (error) {
     refreshAutomaticPriceField(cardId, finish);
     const message = error?.name === 'AbortError' ? 'A consulta demorou demais.' : String(error?.message || 'Não foi possível consultar o preço agora.');
