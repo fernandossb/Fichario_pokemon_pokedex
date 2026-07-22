@@ -1,0 +1,29 @@
+/* Recuperação de artes v12 */
+.card-art-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.2;
+  color: #6b7280;
+}
+.card-art-retry {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 9px;
+  background: #e9f1ff;
+  color: #0b57b7;
+  font-weight: 700;
+  font-size: 10px;
+  cursor: pointer;
+}
+.deck-card-image {
+  width: 44px;
+  height: 61px;
+  object-fit: contain;
+  border-radius: 6px;
+  flex: 0 0 auto;
+}
