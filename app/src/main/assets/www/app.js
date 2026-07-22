@@ -59,6 +59,8 @@ let priceUpdateTotal = 1;
 let priceUpdateFailures = 0;
 let lastPriceDiagnostic = '';
 let selectedDeckId = null;
+let latestUpdateInfo = null;
+let updateCheckInProgress = false;
 
 const ui = {
   tab: 'dashboard',
@@ -961,6 +963,7 @@ async function init() {
     render();
     document.getElementById('loading').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
+    setTimeout(() => checkForAppUpdate(false), 1800);
   } catch (error) {
     document.getElementById('loading').innerHTML = `
       <strong>Não consegui abrir o fichário</strong>
@@ -2428,6 +2431,7 @@ function openBackupPanel() {
     <div class="backup-actions">
       <button class="primary-btn" onclick="exportBackup()">Exportar backup</button>
       <button class="secondary-btn" onclick="importBackup()">Importar backup</button>
+      <button class="secondary-btn" onclick="checkForAppUpdate(true)">Verificar atualização</button>
     </div>`);
 }
 
@@ -2470,6 +2474,78 @@ window.receiveImportedBackup = function(raw) {
   } catch (_) {
     notify('Este arquivo não é um backup válido');
   }
+};
+
+function markdownToSafeHtml(text) {
+  const safe = esc(String(text || ''));
+  return safe
+    .replace(/^###\s+(.+)$/gm, '<strong>$1</strong>')
+    .replace(/^##\s+(.+)$/gm, '<strong>$1</strong>')
+    .replace(/^#\s+(.+)$/gm, '<strong>$1</strong>')
+    .replace(/^[-*]\s+(.+)$/gm, '✓ $1')
+    .replace(/\n/g, '<br>');
+}
+
+function checkForAppUpdate(manual = true) {
+  if (updateCheckInProgress) return;
+  if (!window.Android?.checkForUpdate) {
+    if (manual) notify('Verificação disponível apenas no aplicativo Android.');
+    return;
+  }
+  updateCheckInProgress = true;
+  if (manual) notify('Verificando atualizações...');
+  window.Android.checkForUpdate();
+}
+
+window.receiveUpdateInfo = function(raw) {
+  updateCheckInProgress = false;
+  try {
+    const info = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!info?.ok) {
+      if (info?.error) notify(`Atualização: ${info.error}`);
+      return;
+    }
+    latestUpdateInfo = info;
+    if (!info.updateAvailable) {
+      if (document.getElementById('modal') && !document.getElementById('modal').classList.contains('hidden')) {
+        notify(`Você já está na versão mais recente (${info.currentVersion}).`);
+      }
+      return;
+    }
+    showUpdateModal(info);
+  } catch (_) {
+    notify('Não foi possível interpretar a atualização disponível.');
+  }
+};
+
+function showUpdateModal(info) {
+  showModal(`
+    <button class="modal-close" onclick="closeModal()">×</button>
+    <div class="update-hero">⬆</div>
+    <h2>${esc(info.latestVersion || 'Nova versão disponível')}</h2>
+    <p class="screen-subtitle">Instalada: ${esc(info.currentVersion || '')} · atualização assinada e compatível.</p>
+    <div class="panel update-notes"><strong>Novidades</strong><p>${markdownToSafeHtml(info.notes || 'Melhorias e correções.')}</p></div>
+    <p id="update-status" class="card-meta">O aplicativo baixará o APK oficial publicado no GitHub.</p>
+    <div class="backup-actions">
+      <button class="primary-btn" onclick="startAppUpdate()">Atualizar agora</button>
+      <button class="secondary-btn" onclick="closeModal()">Depois</button>
+    </div>`);
+}
+
+function startAppUpdate() {
+  if (!latestUpdateInfo?.apkUrl || !window.Android?.downloadAndInstallUpdate) {
+    notify('Link da atualização indisponível.');
+    return;
+  }
+  const status = document.getElementById('update-status');
+  if (status) status.textContent = 'Iniciando download...';
+  window.Android.downloadAndInstallUpdate(latestUpdateInfo.apkUrl, latestUpdateInfo.apkName || 'Fichario-Pokemon.apk');
+}
+
+window.receiveUpdateDownload = function(success, message) {
+  const status = document.getElementById('update-status');
+  if (status) status.textContent = message || '';
+  if (success === false) notify(message || 'Falha ao baixar atualização.');
 };
 
 window.handleAndroidBack = function() {

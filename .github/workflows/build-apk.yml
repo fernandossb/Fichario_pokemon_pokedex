@@ -1,15 +1,17 @@
-name: Gerar APK assinado
+name: Gerar APK assinado e publicar atualização
 
 on:
   workflow_dispatch:
   push:
     branches: ["main"]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 40
-
     steps:
       - name: Baixar projeto
         uses: actions/checkout@v4
@@ -56,15 +58,16 @@ jobs:
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/fichario-pokemon-release.jks"
           test -s "$RUNNER_TEMP/fichario-pokemon-release.jks"
 
-      - name: Validar Pokédex e recursos essenciais
+      - name: Validar recursos essenciais
         shell: bash
         run: |
           set -e
           test -f app/src/main/assets/www/index.html
           test -f app/src/main/assets/www/app.js
           test -f app/src/main/assets/www/data/pokedex.json
-          grep -q "\['pokedex', 'Pokédex'\]" app/src/main/assets/www/app.js
           grep -q "renderPokedex" app/src/main/assets/www/app.js
+          grep -q "checkForAppUpdate" app/src/main/assets/www/app.js
+          grep -q "checkForUpdateNative" app/src/main/java/br/com/fichariopokemon/pokedex/MainActivity.java
           COUNT=$(find app/src/main/assets/www/sprites -maxdepth 1 -type f -name '*.png' | wc -l)
           echo "Sprites encontrados: $COUNT"
           test "$COUNT" -ge 1025
@@ -77,25 +80,48 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: gradle --no-daemon clean assembleRelease
 
-      - name: Verificar assinatura e pacote
+      - name: Verificar assinatura
         shell: bash
         run: |
           set -e
           APK=app/build/outputs/apk/release/app-release.apk
           test -f "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | head -20
 
-      - name: Preparar saída
+      - name: Preparar versão
+        id: version
         shell: bash
         run: |
+          VERSION_CODE=$(grep -oE 'versionCode[[:space:]]+[0-9]+' app/build.gradle | awk '{print $2}' | head -1)
+          VERSION_NAME=$(grep -oE "versionName[[:space:]]+'[^']+'" app/build.gradle | sed -E "s/.*'([^']+)'.*/\1/" | head -1)
+          TAG="build-${VERSION_CODE}"
           mkdir -p saida
-          cp app/build/outputs/apk/release/app-release.apk saida/Fichario-Pokemon-Assinado.apk
+          APK_NAME="Fichario-Pokemon-${VERSION_NAME}.apk"
+          cp app/build/outputs/apk/release/app-release.apk "saida/${APK_NAME}"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "apk_name=$APK_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Publicar APK
+      - name: Publicar artefato do build
         uses: actions/upload-artifact@v4
         with:
           name: Fichario-Pokemon-Assinado
-          path: saida/Fichario-Pokemon-Assinado.apk
-          if-no-files-found: error
+          path: saida/${{ steps.version.outputs.apk_name }}
           retention-days: 30
+
+      - name: Criar ou atualizar Release oficial
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
+          APK_NAME: ${{ steps.version.outputs.apk_name }}
+        run: |
+          set -e
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "saida/$APK_NAME" --clobber
+            gh release edit "$TAG" --title "Fichário Pokémon $VERSION_NAME" --notes-file RELEASE_NOTES.md --latest
+          else
+            gh release create "$TAG" "saida/$APK_NAME" --title "Fichário Pokémon $VERSION_NAME" --notes-file RELEASE_NOTES.md --latest
+          fi

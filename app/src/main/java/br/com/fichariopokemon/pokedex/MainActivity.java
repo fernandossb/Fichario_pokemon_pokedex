@@ -2,9 +2,16 @@ package br.com.fichariopokemon.pokedex;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.DownloadManager;
 import android.content.Intent;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.IntentFilter;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
+import android.provider.Settings;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -23,26 +30,39 @@ import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.Toast;
 
+import androidx.core.content.FileProvider;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.File;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
     private static final int CREATE_BACKUP = 1001;
     private static final int OPEN_BACKUP = 1002;
     private static final long LIGA_POLL_INTERVAL_MS = 1200L;
     private static final long LIGA_TIMEOUT_MS = 35000L;
+    private static final String UPDATE_API_URL = "https://api.github.com/repos/fernandossb/Fichario_pokemon_pokedex/releases/latest";
+    private static final String APK_MIME = "application/vnd.android.package-archive";
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Map<String, WebView> ligaProbes = new HashMap<String, WebView>();
+    private final ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor();
+    private long updateDownloadId = -1L;
+    private File pendingInstallFile;
     private FrameLayout rootView;
     private WebView webView;
     private String pendingBackup;
@@ -70,6 +90,7 @@ public final class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(rootView);
+        registerUpdateReceiver();
         webView.loadUrl("file:///android_asset/www/index.html");
     }
 
@@ -99,6 +120,16 @@ public final class MainActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        if (pendingInstallFile != null && canInstallUnknownApps()) {
+            File file = pendingInstallFile;
+            pendingInstallFile = null;
+            installDownloadedApk(file);
+        }
+    }
+
+    @Override
     public void onBackPressed() {
         if (webView != null) {
             webView.evaluateJavascript("window.handleAndroidBack && window.handleAndroidBack()", new ValueCallback<String>() {
@@ -122,6 +153,8 @@ public final class MainActivity extends Activity {
             } catch (Exception ignored) {}
         }
         ligaProbes.clear();
+        try { unregisterReceiver(updateReceiver); } catch (Exception ignored) {}
+        backgroundExecutor.shutdownNow();
         if (webView != null) {
             webView.destroy();
             webView = null;
@@ -296,6 +329,187 @@ public final class MainActivity extends Activity {
         } catch (Exception ignored) {}
     }
 
+    private final BroadcastReceiver updateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (!DownloadManager.ACTION_DOWNLOAD_COMPLETE.equals(intent.getAction())) return;
+            long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L);
+            if (id != updateDownloadId) return;
+            DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+            DownloadManager.Query query = new DownloadManager.Query().setFilterById(id);
+            android.database.Cursor cursor = null;
+            try {
+                cursor = manager.query(query);
+                if (cursor != null && cursor.moveToFirst()) {
+                    int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+                    if (status == DownloadManager.STATUS_SUCCESSFUL && pendingInstallFile != null && pendingInstallFile.exists()) {
+                        runJavascript("window.receiveUpdateDownload && window.receiveUpdateDownload(true,'Download concluído.');");
+                        installDownloadedApk(pendingInstallFile);
+                    } else {
+                        runJavascript("window.receiveUpdateDownload && window.receiveUpdateDownload(false,'Não foi possível baixar a atualização.');");
+                    }
+                }
+            } catch (Exception error) {
+                runJavascript("window.receiveUpdateDownload && window.receiveUpdateDownload(false,'Falha ao verificar o download.');");
+            } finally {
+                if (cursor != null) cursor.close();
+            }
+        }
+    };
+
+    private void registerUpdateReceiver() {
+        IntentFilter filter = new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(updateReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        else registerReceiver(updateReceiver, filter);
+    }
+
+    private void runJavascript(final String script) {
+        runOnUiThread(new Runnable() {
+            @Override public void run() {
+                if (webView != null) webView.evaluateJavascript(script, null);
+            }
+        });
+    }
+
+    private String readText(HttpURLConnection connection) throws Exception {
+        InputStream stream = connection.getResponseCode() >= 400 ? connection.getErrorStream() : connection.getInputStream();
+        if (stream == null) return "";
+        BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8));
+        StringBuilder result = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null) result.append(line).append('\n');
+        reader.close();
+        return result.toString();
+    }
+
+    private int releaseBuildNumber(String tag) {
+        if (tag == null) return 0;
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(\\d+)$").matcher(tag.trim());
+        if (!matcher.find()) return 0;
+        try { return Integer.parseInt(matcher.group(1)); } catch (Exception ignored) { return 0; }
+    }
+
+    private void checkForUpdateNative() {
+        backgroundExecutor.execute(new Runnable() {
+            @Override public void run() {
+                HttpURLConnection connection = null;
+                try {
+                    connection = (HttpURLConnection) new URL(UPDATE_API_URL).openConnection();
+                    connection.setConnectTimeout(15000);
+                    connection.setReadTimeout(20000);
+                    connection.setRequestProperty("Accept", "application/vnd.github+json");
+                    connection.setRequestProperty("User-Agent", "Fichario-Pokemon-Android");
+                    int code = connection.getResponseCode();
+                    if (code < 200 || code >= 300) throw new IllegalStateException("GitHub respondeu HTTP " + code);
+                    JSONObject release = new JSONObject(readText(connection));
+                    String tag = release.optString("tag_name", "");
+                    int latestBuild = releaseBuildNumber(tag);
+                    int currentBuild = getPackageManager().getPackageInfo(getPackageName(), 0).versionCode;
+                    String currentVersion = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+                    String notes = release.optString("body", "Atualização disponível.");
+                    String releaseName = release.optString("name", tag);
+                    String publishedAt = release.optString("published_at", "");
+                    String apkUrl = "";
+                    String apkName = "Fichario-Pokemon.apk";
+                    JSONArray assets = release.optJSONArray("assets");
+                    if (assets != null) {
+                        for (int i = 0; i < assets.length(); i++) {
+                            JSONObject asset = assets.optJSONObject(i);
+                            if (asset == null) continue;
+                            String name = asset.optString("name", "");
+                            if (name.toLowerCase(Locale.US).endsWith(".apk")) {
+                                apkUrl = asset.optString("browser_download_url", "");
+                                apkName = name;
+                                break;
+                            }
+                        }
+                    }
+                    JSONObject result = new JSONObject();
+                    result.put("ok", true);
+                    result.put("currentBuild", currentBuild);
+                    result.put("latestBuild", latestBuild);
+                    result.put("currentVersion", currentVersion == null ? "" : currentVersion);
+                    result.put("latestVersion", releaseName);
+                    result.put("notes", notes);
+                    result.put("publishedAt", publishedAt);
+                    result.put("apkUrl", apkUrl);
+                    result.put("apkName", apkName);
+                    result.put("updateAvailable", latestBuild > currentBuild && apkUrl.length() > 0);
+                    final String payload = result.toString();
+                    runJavascript("window.receiveUpdateInfo && window.receiveUpdateInfo(" + JSONObject.quote(payload) + ");");
+                } catch (Exception error) {
+                    JSONObject result = new JSONObject();
+                    try {
+                        result.put("ok", false);
+                        result.put("error", error.getMessage() == null ? "Falha ao consultar atualizações." : error.getMessage());
+                    } catch (Exception ignored) {}
+                    final String payload = result.toString();
+                    runJavascript("window.receiveUpdateInfo && window.receiveUpdateInfo(" + JSONObject.quote(payload) + ");");
+                } finally {
+                    if (connection != null) connection.disconnect();
+                }
+            }
+        });
+    }
+
+    private boolean canInstallUnknownApps() {
+        return Build.VERSION.SDK_INT < 26 || getPackageManager().canRequestPackageInstalls();
+    }
+
+    private void requestInstallPermission() {
+        if (Build.VERSION.SDK_INT < 26) return;
+        Intent intent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Uri.parse("package:" + getPackageName()));
+        startActivity(intent);
+    }
+
+    private void downloadUpdateNative(String url, String fileName) {
+        try {
+            URL parsed = new URL(url);
+            if (!"github.com".equalsIgnoreCase(parsed.getHost()) && !"objects.githubusercontent.com".equalsIgnoreCase(parsed.getHost())) {
+                throw new IllegalArgumentException("Endereço de atualização não autorizado.");
+            }
+            String safeName = String.valueOf(fileName).replaceAll("[^a-zA-Z0-9._-]", "_");
+            if (!safeName.toLowerCase(Locale.US).endsWith(".apk")) safeName += ".apk";
+            pendingInstallFile = new File(getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), safeName);
+            if (pendingInstallFile.exists()) pendingInstallFile.delete();
+            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+            request.setTitle("Atualizando Fichário Pokémon");
+            request.setDescription("Baixando a nova versão do aplicativo");
+            request.setMimeType(APK_MIME);
+            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            request.setDestinationInExternalFilesDir(MainActivity.this, Environment.DIRECTORY_DOWNLOADS, safeName);
+            DownloadManager manager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+            updateDownloadId = manager.enqueue(request);
+            runJavascript("window.receiveUpdateDownload && window.receiveUpdateDownload(null,'Download iniciado.');");
+        } catch (Exception error) {
+            String message = error.getMessage() == null ? "Não foi possível iniciar o download." : error.getMessage();
+            runJavascript("window.receiveUpdateDownload && window.receiveUpdateDownload(false," + JSONObject.quote(message) + ");");
+        }
+    }
+
+    private void installDownloadedApk(File apkFile) {
+        if (apkFile == null || !apkFile.exists()) {
+            Toast.makeText(this, "Arquivo da atualização não encontrado", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (!canInstallUnknownApps()) {
+            pendingInstallFile = apkFile;
+            Toast.makeText(this, "Permita instalar apps desta fonte e volte ao Fichário.", Toast.LENGTH_LONG).show();
+            requestInstallPermission();
+            return;
+        }
+        try {
+            Uri uri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", apkFile);
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(uri, APK_MIME);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+        } catch (Exception error) {
+            Toast.makeText(this, "Não foi possível abrir o instalador", Toast.LENGTH_LONG).show();
+        }
+    }
+
     public final class AppBridge {
         @JavascriptInterface
         public double getTopInsetCss() {
@@ -342,6 +556,18 @@ public final class MainActivity extends Activity {
                     intent.setType("application/json");
                     startActivityForResult(intent, OPEN_BACKUP);
                 }
+            });
+        }
+
+        @JavascriptInterface
+        public void checkForUpdate() {
+            checkForUpdateNative();
+        }
+
+        @JavascriptInterface
+        public void downloadAndInstallUpdate(final String url, final String fileName) {
+            runOnUiThread(new Runnable() {
+                @Override public void run() { downloadUpdateNative(url, fileName); }
             });
         }
 
