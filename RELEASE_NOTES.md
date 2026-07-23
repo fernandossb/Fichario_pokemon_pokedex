@@ -1,3 +1,13 @@
+# v1.3.0 — Tema Gengar
+
+- Tema visual roxo e preto inspirado no Gengar.
+- Cabeçalho animado com Gengar, névoa e brilho leve.
+- Abas superiores convertidas em botões com ícones.
+- Removida a necessidade de navegação inferior.
+- Cartões, filtros, formulários, Pokédex, decks e modais adaptados ao novo tema.
+- Animações leves, respeitando a configuração de redução de movimento do aparelho.
+- Mantidas todas as funções e otimizações de performance da v1.2.
+
 # Fichário Pokémon v1.2.0
 
 - Catálogo otimizado para mais de 23 mil cartas.

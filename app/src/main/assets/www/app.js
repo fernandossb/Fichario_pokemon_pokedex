@@ -32,13 +32,13 @@ const CENTRAL_PRICE_DB_KEY = 'current';
 const CENTRAL_PRICE_SYNC_TTL = 6 * 60 * 60 * 1000;
 const LIGA_POKEMON_BASES = ['https://www.ligapokemon.com.br/', 'https://ligapokemon.com.br/'];
 const TAB_ITEMS = [
-  ['dashboard', 'Painel'],
-  ['sets', 'Coleções'],
-  ['cards', 'Cartas'],
-  ['pokedex', 'Pokédex'],
-  ['decks', 'Decks'],
-  ['wishlist', 'Wishlist'],
-  ['repeated', 'Repetidas'],
+  ['dashboard', 'Painel', 'home'],
+  ['sets', 'Coleções', 'collections'],
+  ['cards', 'Cartas', 'cards'],
+  ['pokedex', 'Pokédex', 'pokedex'],
+  ['decks', 'Decks', 'decks'],
+  ['wishlist', 'Wishlist', 'wishlist'],
+  ['repeated', 'Repetidas', 'repeated'],
 ];
 const REGION_ORDER = ['Kanto','Johto','Hoenn','Sinnoh','Unova','Kalos','Alola','Galar','Paldea','Outros'];
 
@@ -1425,10 +1425,25 @@ function renderKeepingScroll() {
   requestAnimationFrame(() => window.scrollTo(0, y));
 }
 
+function tabIcon(name) {
+  const icons = {
+    home: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.2 12 3l9 8.2v9.3a1.5 1.5 0 0 1-1.5 1.5H15v-6H9v6H4.5A1.5 1.5 0 0 1 3 20.5z"/></svg>',
+    collections: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="7" height="14" rx="1.5"/><rect x="10" y="3" width="7" height="16" rx="1.5"/><path d="m17 6 4 1v12l-4-1z"/></svg>',
+    cards: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="13" height="18" rx="2"/><circle cx="11.5" cy="10" r="3"/><path d="M8 16h7"/></svg>',
+    pokedex: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><circle cx="12" cy="12" r="3"/></svg>',
+    decks: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="4" width="12" height="16" rx="2"/><path d="M3 7v11a2 2 0 0 0 2 2M9 1h8a2 2 0 0 1 2 2v14"/></svg>',
+    wishlist: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21S3 16 3 9.5A4.5 4.5 0 0 1 11 6.7 4.5 4.5 0 0 1 21 9.5C21 16 12 21 12 21z"/></svg>',
+    repeated: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h11v11H7z"/><path d="M4 4h11v3M4 4v11h3"/><path d="M11 12h3M12.5 10.5v3"/></svg>'
+  };
+  return icons[name] || icons.cards;
+}
+
 function renderTabs() {
   const root = document.getElementById('tabs');
-  root.innerHTML = TAB_ITEMS.map(([value, label]) => `
-    <button class="tab ${ui.tab === value ? 'active' : ''}" onclick="setTab('${value}')">${label}</button>
+  root.innerHTML = TAB_ITEMS.map(([value, label, icon]) => `
+    <button class="tab ${ui.tab === value ? 'active' : ''}" onclick="setTab('${value}')" aria-label="${label}">
+      <span class="tab-icon">${tabIcon(icon)}</span><span class="tab-label">${label}</span>
+    </button>
   `).join('');
 }
 
