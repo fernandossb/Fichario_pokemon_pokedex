@@ -1,7 +1,8 @@
-# Versão 0.22.0 — Artes de Energias
+# Versão 0.23.0 — Imagens locais
 
-- Corrige as artes das Energias de Água SVE 003, 011 e 019 e MEE 003.
-- Adiciona busca específica para cartas de Energia por supertipo, subtipo, tipo e número.
-- Tenta diretamente o CDN da TCGdex quando a API omite o campo de imagem.
-- Limpa automaticamente o cache antigo do sistema de imagens.
-- Mantém Pokédex, preços, decks, assinatura e atualização automática.
+- Adicione uma imagem da carta pela câmera ou pela galeria.
+- Troque ou remova a imagem local quando quiser.
+- A foto é recortada e comprimida automaticamente.
+- A imagem fica associada ao ID exato da carta.
+- Imagens locais agora são incluídas no backup e restauradas em outro aparelho.
+- Mantidos preços multifonte, Pokédex, decks, assinatura e atualização automática.

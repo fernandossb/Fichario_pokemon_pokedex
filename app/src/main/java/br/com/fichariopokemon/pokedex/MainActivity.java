@@ -12,6 +12,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.Settings;
+import android.provider.MediaStore;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -53,6 +54,7 @@ import java.util.concurrent.Executors;
 public final class MainActivity extends Activity {
     private static final int CREATE_BACKUP = 1001;
     private static final int OPEN_BACKUP = 1002;
+    private static final int PICK_CARD_IMAGE = 1003;
     private static final long LIGA_POLL_INTERVAL_MS = 1200L;
     private static final long LIGA_TIMEOUT_MS = 35000L;
     private static final String UPDATE_API_URL = "https://api.github.com/repos/fernandossb/Fichario_pokemon_pokedex/releases/latest";
@@ -66,6 +68,8 @@ public final class MainActivity extends Activity {
     private FrameLayout rootView;
     private WebView webView;
     private String pendingBackup;
+    private ValueCallback<Uri[]> pendingImageChooser;
+    private Uri pendingCameraImageUri;
     private double topInsetCss;
     private double bottomInsetCss;
 
@@ -84,7 +88,21 @@ public final class MainActivity extends Activity {
         webView.setBackgroundColor(Color.rgb(255, 248, 220));
         configureWebView(webView, false);
         webView.setWebViewClient(new WebViewClient());
-        webView.setWebChromeClient(new WebChromeClient());
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
+                if (pendingImageChooser != null) pendingImageChooser.onReceiveValue(null);
+                pendingImageChooser = filePathCallback;
+                try {
+                    launchImageChooser(fileChooserParams != null && fileChooserParams.isCaptureEnabled());
+                    return true;
+                } catch (Exception error) {
+                    pendingImageChooser = null;
+                    Toast.makeText(MainActivity.this, "Não foi possível abrir câmera ou galeria", Toast.LENGTH_LONG).show();
+                    return false;
+                }
+            }
+        });
         webView.addJavascriptInterface(new AppBridge(), "Android");
         rootView.addView(webView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -162,9 +180,59 @@ public final class MainActivity extends Activity {
         super.onDestroy();
     }
 
+    private void launchImageChooser(boolean cameraOnly) throws Exception {
+        Intent galleryIntent = new Intent(Intent.ACTION_GET_CONTENT);
+        galleryIntent.addCategory(Intent.CATEGORY_OPENABLE);
+        galleryIntent.setType("image/*");
+
+        Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        File cameraFile = File.createTempFile("card-photo-", ".jpg", getExternalCacheDir() != null ? getExternalCacheDir() : getCacheDir());
+        pendingCameraImageUri = FileProvider.getUriForFile(
+                this,
+                getPackageName() + ".fileprovider",
+                cameraFile);
+        cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, pendingCameraImageUri);
+        cameraIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+
+        Intent chooser;
+        if (cameraOnly && cameraIntent.resolveActivity(getPackageManager()) != null) {
+            chooser = cameraIntent;
+        } else {
+            chooser = Intent.createChooser(galleryIntent, "Escolher imagem da carta");
+            if (cameraIntent.resolveActivity(getPackageManager()) != null) {
+                chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{cameraIntent});
+            }
+        }
+        startActivityForResult(chooser, PICK_CARD_IMAGE);
+    }
+
+    private Uri[] imageChooserResult(int resultCode, Intent data) {
+        if (resultCode != RESULT_OK) return null;
+        if (data == null || (data.getData() == null && data.getClipData() == null)) {
+            return pendingCameraImageUri == null ? null : new Uri[]{pendingCameraImageUri};
+        }
+        if (data.getClipData() != null) {
+            int count = data.getClipData().getItemCount();
+            Uri[] uris = new Uri[count];
+            for (int index = 0; index < count; index++) uris[index] = data.getClipData().getItemAt(index).getUri();
+            return uris;
+        }
+        return data.getData() == null ? null : new Uri[]{data.getData()};
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == PICK_CARD_IMAGE) {
+            if (pendingImageChooser != null) {
+                pendingImageChooser.onReceiveValue(imageChooserResult(resultCode, data));
+                pendingImageChooser = null;
+            }
+            pendingCameraImageUri = null;
+            return;
+        }
+
         if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
         try {

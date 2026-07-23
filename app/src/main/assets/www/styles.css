@@ -372,3 +372,38 @@ button, input, select, textarea { font: inherit; }
   flex: 0 0 auto;
 }
 
+
+
+/* Imagens locais da coleção */
+.local-image-actions {
+  display: grid;
+  gap: 10px;
+  margin: 18px 0;
+}
+.local-card-image-toolbar {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0 4px;
+}
+.compact-btn {
+  width: auto;
+  min-height: 38px;
+  padding: 8px 12px;
+}
+.card-art-local {
+  border: 0;
+  border-radius: 10px;
+  background: #0b5cab;
+  color: #fff;
+  font-weight: 700;
+  padding: 8px 10px;
+  margin-top: 7px;
+}
+.danger-btn {
+  border: 1px solid #b3261e;
+  border-radius: 10px;
+  background: #fff;
+  color: #b3261e;
+  font-weight: 700;
+  padding: 11px 14px;
+}

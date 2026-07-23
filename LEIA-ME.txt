@@ -1,0 +1,20 @@
+PATCH v0.23 — Imagens locais
+
+COMO APLICAR
+1. Extraia este ZIP.
+2. Copie todo o conteúdo extraído.
+3. Cole na pasta principal do repositório.
+4. Confirme "Substituir os arquivos no destino".
+5. No GitHub Desktop, confirme que somente os arquivos deste patch foram alterados.
+6. Commit: Versão 0.23 - imagens locais
+7. Push origin.
+8. Aguarde o Actions ficar verde e atualize pelo aplicativo.
+
+FUNCIONALIDADES
+- Câmera e galeria.
+- Recorte central automático no formato da carta.
+- Compressão JPEG.
+- Trocar e remover imagem.
+- Armazenamento local em IndexedDB.
+- Inclusão das imagens no backup.
+- Restauração das imagens ao importar o backup.

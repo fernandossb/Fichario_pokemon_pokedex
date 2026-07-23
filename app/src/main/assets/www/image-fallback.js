@@ -390,6 +390,17 @@
       resolveAndApply(cardId, true);
     });
     placeholder.appendChild(button);
+
+    const localButton = document.createElement('button');
+    localButton.type = 'button';
+    localButton.className = 'card-art-local';
+    localButton.textContent = 'Adicionar imagem';
+    localButton.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      window.FicharioLocalImages?.open?.(cardId);
+    });
+    placeholder.appendChild(localButton);
     return placeholder;
   }
 
@@ -416,6 +427,12 @@
 
   async function providerCandidates(card, force) {
     const list = [];
+
+    try {
+      const localImage = await window.FicharioLocalImages?.get?.(card?.id);
+      if (localImage?.dataUrl) list.push({ url: localImage.dataUrl, source: 'imagem-local-usuario' });
+    } catch (_) {}
+
     const userPhoto = String(card?.userPhotoUri || card?.photoUri || card?.photo || '').trim();
     if (userPhoto) list.push({ url: userPhoto, source: 'foto-usuario' });
 

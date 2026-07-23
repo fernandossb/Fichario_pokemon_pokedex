@@ -2435,21 +2435,28 @@ function openBackupPanel() {
     </div>`);
 }
 
-function exportBackup() {
-  const payload = JSON.stringify({
-    format: 'fichario-pokemon-br-plus-backup',
-    exportedAt: new Date().toISOString(),
-    state,
-    priceCache,
-    fxCache,
-    ligaSetCache,
-  }, null, 2);
-  if (window.Android?.exportBackup) window.Android.exportBackup(payload);
-  else {
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(new Blob([payload], {type:'application/json'}));
-    link.download = 'fichario-pokemon-backup.json';
-    link.click();
+async function exportBackup() {
+  try {
+    const localImages = await window.FicharioLocalImages?.exportData?.() || [];
+    const payload = JSON.stringify({
+      format: 'fichario-pokemon-br-plus-backup',
+      backupVersion: 2,
+      exportedAt: new Date().toISOString(),
+      state,
+      priceCache,
+      fxCache,
+      ligaSetCache,
+      localImages,
+    }, null, 2);
+    if (window.Android?.exportBackup) window.Android.exportBackup(payload);
+    else {
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(new Blob([payload], {type:'application/json'}));
+      link.download = 'fichario-pokemon-backup.json';
+      link.click();
+    }
+  } catch (_) {
+    notify('Não foi possível preparar o backup');
   }
 }
 
@@ -2457,7 +2464,7 @@ function importBackup() {
   if (window.Android?.importBackup) window.Android.importBackup();
 }
 
-window.receiveImportedBackup = function(raw) {
+window.receiveImportedBackup = async function(raw) {
   try {
     const payload = JSON.parse(raw);
     if (payload?.format !== 'fichario-pokemon-br-plus-backup' || !payload.state?.entries) throw new Error('Formato inválido');
@@ -2467,10 +2474,14 @@ window.receiveImportedBackup = function(raw) {
     if (payload.priceCache && typeof payload.priceCache === 'object') { priceCache = payload.priceCache; savePriceCache(); }
     if (payload.fxCache && typeof payload.fxCache === 'object') { fxCache = payload.fxCache; saveFxCache(); }
     if (payload.ligaSetCache && typeof payload.ligaSetCache === 'object') { ligaSetCache = payload.ligaSetCache; saveLigaSetCache(); }
+    let restoredImages = 0;
+    if (Array.isArray(payload.localImages)) {
+      restoredImages = await window.FicharioLocalImages?.importData?.(payload.localImages, true) || 0;
+    }
     saveState();
     closeModal();
     render();
-    notify('Backup importado com sucesso');
+    notify(restoredImages ? `Backup importado · ${restoredImages} imagens restauradas` : 'Backup importado com sucesso');
   } catch (_) {
     notify('Este arquivo não é um backup válido');
   }
