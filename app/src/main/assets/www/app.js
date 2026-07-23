@@ -73,6 +73,10 @@ let centralPriceData = { meta: {}, prices: {} };
 let centralPriceStatus = {};
 let centralPriceSyncing = false;
 let centralPriceLastCheck = 0;
+let cardSearchIndex = new Map();
+let cardsBySet = new Map();
+let staticCardSortCache = new Map();
+let pokemonInferenceCache = new Map();
 
 const ui = {
   tab: 'dashboard',
@@ -80,7 +84,7 @@ const ui = {
   cardFilter: 'owned',
   cardSort: 'number',
   cardSet: 'all',
-  cardLimit: 80,
+  cardLimit: 40,
   setQuery: '',
   dexQuery: '',
   dexRegion: 'all',
@@ -1060,6 +1064,7 @@ async function loadCatalogData() {
 function inferPokemonIds(cardName) {
   const normalized = normalize(cardName);
   if (!normalized) return [];
+  if (pokemonInferenceCache.has(normalized)) return pokemonInferenceCache.get(normalized).slice();
   const found = [];
   for (const item of pokemonNameIndex) {
     const pattern = item.normalized;
@@ -1067,7 +1072,20 @@ function inferPokemonIds(cardName) {
       found.push(item.id);
     }
   }
-  return [...new Set(found)];
+  const result = [...new Set(found)];
+  pokemonInferenceCache.set(normalized, result);
+  return result.slice();
+}
+
+function rebuildPerformanceIndexes() {
+  cardSearchIndex = new Map();
+  cardsBySet = new Map();
+  staticCardSortCache = new Map();
+  for (const card of cards) {
+    cardSearchIndex.set(card.id, normalize(`${card.name} ${card.number} ${card.localId} ${card.setName} ${card.rarity || ''} ${card.illustrator || ''}`));
+    if (!cardsBySet.has(card.setId)) cardsBySet.set(card.setId, []);
+    cardsBySet.get(card.setId).push(card);
+  }
 }
 
 function rebuildCatalogIndexes() {
@@ -1084,6 +1102,7 @@ function rebuildCatalogIndexes() {
   }
   cardMap = new Map(cards.map(card => [card.id, card]));
   pokemonCards = new Map(pokedex.map(item => [item.id, []]));
+  rebuildPerformanceIndexes();
   for (const card of cards) {
     for (const pokemonId of card.pokemonIds || []) {
       if (pokemonCards.has(pokemonId)) pokemonCards.get(pokemonId).push(card.id);
@@ -1102,7 +1121,6 @@ async function init() {
     catalogUpdateMeta = loadCatalogUpdateMeta();
     catalogUpdating = false;
     loadPricingState();
-    await loadCentralPriceCache();
     state = loadState();
     // Ao mudar para a média brasileira, removemos uma vez os valores internacionais antigos.
     const storedLogicVersion = Number(localStorage.getItem(PRICE_LOGIC_VERSION_KEY) || 0);
@@ -1144,7 +1162,11 @@ async function init() {
     document.getElementById('loading').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     setTimeout(() => checkForAppUpdate(false), 1800);
-    setTimeout(() => syncCentralPrices(false), 2300);
+    setTimeout(async () => {
+      await loadCentralPriceCache();
+      if (ui.tab === 'dashboard' || ui.tab === 'cards') renderKeepingScroll();
+      syncCentralPrices(false);
+    }, 900);
   } catch (error) {
     document.getElementById('loading').innerHTML = `
       <strong>Não consegui abrir o fichário</strong>
@@ -1990,24 +2012,40 @@ function sortablePriceForCard(cardId) {
   return values.length ? Math.max(...values) : Number.NEGATIVE_INFINITY;
 }
 
+function cardsForCurrentFilter(filter) {
+  const setCards = ui.cardSet === 'all' ? cards : (cardsBySet.get(ui.cardSet) || []);
+  if (filter === 'all' || filter === 'missing') return setCards;
+  const result = [];
+  for (const [cardId, entry] of Object.entries(state.entries || {})) {
+    const card = cardMap.get(cardId);
+    if (!card || (ui.cardSet !== 'all' && card.setId !== ui.cardSet)) continue;
+    const quantity = Number(entry.quantity) || 0;
+    if (filter === 'owned' && quantity > 0) result.push(card);
+    else if (filter === 'wishlist' && entry.wishlist) result.push(card);
+    else if (filter === 'repeated' && quantity > 1) result.push(card);
+    else if (filter === 'price-review' && cardNeedsPriceValidation(cardId)) result.push(card);
+  }
+  return result;
+}
+
+function cachedStaticSort(source, sort, cacheKey) {
+  if (!['number','name','set'].includes(sort)) return source.slice().sort(cardSorter(sort));
+  const key = `${cacheKey}|${sort}`;
+  if (!staticCardSortCache.has(key)) staticCardSortCache.set(key, source.slice().sort(cardSorter(sort)));
+  return staticCardSortCache.get(key);
+}
+
 function filteredCardsForUi() {
   const forcedFilter = ui.tab === 'wishlist' ? 'wishlist' : ui.tab === 'repeated' ? 'repeated' : null;
   const filter = forcedFilter || ui.cardFilter;
   const query = normalize(ui.cardQuery);
-  const result = cards.filter(card => {
-    const entry = entryFor(card.id);
-    const quantity = quantityFor(card.id);
-    if (ui.cardSet !== 'all' && card.setId !== ui.cardSet) return false;
-    if (filter === 'owned' && quantity <= 0) return false;
-    if (filter === 'missing' && quantity > 0) return false;
-    if (filter === 'wishlist' && !entry.wishlist) return false;
-    if (filter === 'repeated' && quantity <= 1) return false;
-    if (filter === 'price-review' && !cardNeedsPriceValidation(card.id)) return false;
-    if (!query) return true;
-    const haystack = normalize(`${card.name} ${card.number} ${card.localId} ${card.setName} ${card.rarity || ''}`);
-    return haystack.includes(query);
-  });
-  result.sort(cardSorter(ui.cardSort));
+  let result = cardsForCurrentFilter(filter);
+  if (filter === 'missing') result = result.filter(card => quantityFor(card.id) <= 0);
+  if (query) result = result.filter(card => (cardSearchIndex.get(card.id) || '').includes(query));
+  const cacheKey = `${ui.cardSet}|${filter}|${query || '-'}`;
+  result = (!query && (filter === 'all' || filter === 'missing'))
+    ? cachedStaticSort(result, ui.cardSort, cacheKey)
+    : result.slice().sort(cardSorter(ui.cardSort));
   return { result, visible: result.slice(0, ui.cardLimit), forcedFilter, filter };
 }
 
@@ -2020,7 +2058,8 @@ function renderCardSearchResults() {
 }
 
 function renderCards() {
-  const { forcedFilter, filter } = filteredCardsForUi();
+  const forcedFilter = ui.tab === 'wishlist' ? 'wishlist' : ui.tab === 'repeated' ? 'repeated' : null;
+  const filter = forcedFilter || ui.cardFilter;
   const title = ui.tab === 'wishlist' ? 'Wishlist' : ui.tab === 'repeated' ? 'Cartas repetidas' : 'Cartas';
   const selectedSet = ui.cardSet === 'all' ? null : catalog.sets.find(set => set.id === ui.cardSet);
   return `
@@ -2034,10 +2073,10 @@ function renderCards() {
           oninput="searchAndRender('cardQuery', this.value, 'cardSearchInput')">
         ${!forcedFilter ? `<div class="chips">${filterChips()}</div>` : ''}
         <div class="filter-grid">
-          <select class="field" onchange="ui.cardSort=this.value;ui.cardLimit=80;render()">
+          <select class="field" onchange="ui.cardSort=this.value;ui.cardLimit=40;render()">
             ${option('number','Número',ui.cardSort)}${option('name','Nome',ui.cardSort)}${option('quantity','Quantidade',ui.cardSort)}${option('price-desc','Preço: maior → menor',ui.cardSort)}${option('set','Coleção',ui.cardSort)}
           </select>
-          <select class="field" onchange="ui.cardSet=this.value;ui.cardLimit=80;render()">
+          <select class="field" onchange="ui.cardSet=this.value;ui.cardLimit=40;render()">
             <option value="all">Todas as coleções</option>
             ${catalog.sets.map(set => option(set.id, set.name, ui.cardSet)).join('')}
           </select>
@@ -2049,7 +2088,7 @@ function renderCards() {
 
 function filterChips() {
   const chips = [['all','Todos'],['owned','Tenho'],['missing','Falta'],['wishlist','Desejo'],['repeated','Rep.'],['price-review','Preço pendente']];
-  return chips.map(([value,label]) => `<button class="chip ${ui.cardFilter===value?'active':''}" onclick="ui.cardFilter='${value}';ui.cardLimit=80;render()">${label}</button>`).join('');
+  return chips.map(([value,label]) => `<button class="chip ${ui.cardFilter===value?'active':''}" onclick="ui.cardFilter='${value}';ui.cardLimit=40;render()">${label}</button>`).join('');
 }
 
 function cardSorter(sort) {
@@ -2071,7 +2110,7 @@ function renderCardRow(card) {
   const pokemonNames = (card.pokemonIds || []).slice(0,3).map(id => pokemonMap.get(id)?.name).filter(Boolean);
   const priceBadge = priceBadgeForCard(card.id);
   return `<article class="card-row ${quantity > 0 ? '' : 'missing'}" onclick="openCard('${esc(card.id)}')">
-    ${card.imageUrl ? `<img class="card-thumb" src="${esc(card.imageUrl)}" loading="lazy" onerror="this.outerHTML='<div class=&quot;card-placeholder&quot;>TCG</div>'">` : '<div class="card-placeholder">TCG</div>'}
+    ${card.imageUrl ? `<img class="card-thumb" src="${esc(card.imageUrl)}" loading="lazy" decoding="async" fetchpriority="low" onerror="this.outerHTML='<div class=&quot;card-placeholder&quot;>TCG</div>'">` : '<div class="card-placeholder">TCG</div>'}
     <div class="card-main">
       <div class="card-name">${esc(card.name)}</div>
       <div class="card-meta">${esc(card.number)} · ${esc(card.setName)}</div>
@@ -2658,11 +2697,11 @@ function refreshSearchResults(field, keepScroll = false) {
 
 function searchAndRender(field, value, inputId) {
   ui[field] = value;
-  if (field === 'cardQuery') ui.cardLimit = 80;
+  if (field === 'cardQuery') ui.cardLimit = 40;
   const input = document.getElementById(inputId);
   if (input?.dataset.composing === '1') return;
   clearTimeout(searchRenderTimer);
-  searchRenderTimer = setTimeout(() => refreshSearchResults(field), 70);
+  searchRenderTimer = setTimeout(() => refreshSearchResults(field), field === 'cardQuery' ? 250 : 100);
 }
 
 function showModal(html) {

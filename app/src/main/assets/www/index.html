@@ -15,18 +15,19 @@
   </div>
 
   <div id="app" class="app hidden">
-    <header class="app-header">
-      <div class="kicker">POKÉMON TCG BRASIL</div>
-      <div class="header-row">
-        <div>
-          <h1>Fichário digital</h1>
-          <p id="header-status">Coleção local protegida</p>
+    <div class="sticky-shell">
+      <header class="app-header">
+        <div class="kicker">POKÉMON TCG BRASIL</div>
+        <div class="header-row">
+          <div>
+            <h1>Fichário digital</h1>
+            <p id="header-status">Coleção local protegida</p>
+          </div>
+          <button class="header-icon" onclick="openBackupPanel()" aria-label="Backup">⋮</button>
         </div>
-        <button class="header-icon" onclick="openBackupPanel()" aria-label="Backup">⋮</button>
-      </div>
-    </header>
-
-    <nav id="tabs" class="tabs" aria-label="Navegação principal"></nav>
+      </header>
+      <nav id="tabs" class="tabs" aria-label="Navegação principal"></nav>
+    </div>
     <main id="content" class="content" aria-live="polite"></main>
   </div>
 
