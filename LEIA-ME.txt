@@ -1,12 +1,13 @@
-PATCH v0.28 - PREÇOS ROBUSTOS
+FICHÁRIO POKÉMON v1.0.0 — BASE LIMPA
 
-1. Extraia este ZIP.
-2. Copie a pasta app e o arquivo RELEASE_NOTES.md.
-3. Cole na raiz do repositório e confirme a substituição.
-4. Faça commit e Push origin.
-5. Aguarde o GitHub Actions e atualize pelo app.
+Este pacote é o projeto completo consolidado e deve substituir o conteúdo do repositório, preservando somente a pasta .git local.
 
-Arquivos alterados:
-- app/src/main/assets/www/app.js
-- app/build.gradle
-- RELEASE_NOTES.md
+Fluxo:
+1. Faça backup da pasta atual do repositório.
+2. No GitHub Desktop, aborte qualquer merge em andamento.
+3. Substitua o conteúdo do repositório por este projeto, sem apagar .git.
+4. Commit to main.
+5. Push origin.
+6. Aguarde o GitHub Actions gerar o APK assinado.
+
+A assinatura continua usando os mesmos Secrets do GitHub.

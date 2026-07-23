@@ -12,6 +12,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.Settings;
+import android.provider.MediaStore;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -43,6 +44,8 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Locale;
@@ -53,6 +56,7 @@ import java.util.concurrent.Executors;
 public final class MainActivity extends Activity {
     private static final int CREATE_BACKUP = 1001;
     private static final int OPEN_BACKUP = 1002;
+    private static final int PICK_CARD_IMAGE = 1003;
     private static final long LIGA_POLL_INTERVAL_MS = 1200L;
     private static final long LIGA_TIMEOUT_MS = 35000L;
     private static final String UPDATE_API_URL = "https://api.github.com/repos/fernandossb/Fichario_pokemon_pokedex/releases/latest";
@@ -66,6 +70,8 @@ public final class MainActivity extends Activity {
     private FrameLayout rootView;
     private WebView webView;
     private String pendingBackup;
+    private ValueCallback<Uri[]> pendingImageChooser;
+    private Uri pendingCameraImageUri;
     private double topInsetCss;
     private double bottomInsetCss;
 
@@ -84,7 +90,21 @@ public final class MainActivity extends Activity {
         webView.setBackgroundColor(Color.rgb(255, 248, 220));
         configureWebView(webView, false);
         webView.setWebViewClient(new WebViewClient());
-        webView.setWebChromeClient(new WebChromeClient());
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
+                if (pendingImageChooser != null) pendingImageChooser.onReceiveValue(null);
+                pendingImageChooser = filePathCallback;
+                try {
+                    launchImageChooser(fileChooserParams != null && fileChooserParams.isCaptureEnabled());
+                    return true;
+                } catch (Exception error) {
+                    pendingImageChooser = null;
+                    Toast.makeText(MainActivity.this, "Não foi possível abrir câmera ou galeria", Toast.LENGTH_LONG).show();
+                    return false;
+                }
+            }
+        });
         webView.addJavascriptInterface(new AppBridge(), "Android");
         rootView.addView(webView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -162,9 +182,59 @@ public final class MainActivity extends Activity {
         super.onDestroy();
     }
 
+    private void launchImageChooser(boolean cameraOnly) throws Exception {
+        Intent galleryIntent = new Intent(Intent.ACTION_GET_CONTENT);
+        galleryIntent.addCategory(Intent.CATEGORY_OPENABLE);
+        galleryIntent.setType("image/*");
+
+        Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        File cameraFile = File.createTempFile("card-photo-", ".jpg", getExternalCacheDir() != null ? getExternalCacheDir() : getCacheDir());
+        pendingCameraImageUri = FileProvider.getUriForFile(
+                this,
+                getPackageName() + ".fileprovider",
+                cameraFile);
+        cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, pendingCameraImageUri);
+        cameraIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+
+        Intent chooser;
+        if (cameraOnly && cameraIntent.resolveActivity(getPackageManager()) != null) {
+            chooser = cameraIntent;
+        } else {
+            chooser = Intent.createChooser(galleryIntent, "Escolher imagem da carta");
+            if (cameraIntent.resolveActivity(getPackageManager()) != null) {
+                chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{cameraIntent});
+            }
+        }
+        startActivityForResult(chooser, PICK_CARD_IMAGE);
+    }
+
+    private Uri[] imageChooserResult(int resultCode, Intent data) {
+        if (resultCode != RESULT_OK) return null;
+        if (data == null || (data.getData() == null && data.getClipData() == null)) {
+            return pendingCameraImageUri == null ? null : new Uri[]{pendingCameraImageUri};
+        }
+        if (data.getClipData() != null) {
+            int count = data.getClipData().getItemCount();
+            Uri[] uris = new Uri[count];
+            for (int index = 0; index < count; index++) uris[index] = data.getClipData().getItemAt(index).getUri();
+            return uris;
+        }
+        return data.getData() == null ? null : new Uri[]{data.getData()};
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == PICK_CARD_IMAGE) {
+            if (pendingImageChooser != null) {
+                pendingImageChooser.onReceiveValue(imageChooserResult(resultCode, data));
+                pendingImageChooser = null;
+            }
+            pendingCameraImageUri = null;
+            return;
+        }
+
         if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
         try {
@@ -510,6 +580,180 @@ public final class MainActivity extends Activity {
         }
     }
 
+
+    private String fetchPublicText(String urlValue) throws Exception {
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(urlValue).openConnection();
+            connection.setConnectTimeout(18000);
+            connection.setReadTimeout(25000);
+            connection.setInstanceFollowRedirects(true);
+            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/126 Safari/537.36");
+            connection.setRequestProperty("Accept-Language", "pt-BR,pt;q=0.9,en;q=0.7");
+            int status = connection.getResponseCode();
+            if (status < 200 || status >= 400) throw new IllegalStateException("HTTP " + status);
+            return readText(connection);
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private String htmlToPlainText(String html) {
+        if (html == null) return "";
+        String value = html
+                .replaceAll("(?is)<script[^>]*>.*?</script>", " ")
+                .replaceAll("(?is)<style[^>]*>.*?</style>", " ")
+                .replaceAll("(?i)<br\\s*/?>", "\n")
+                .replaceAll("(?i)</(div|p|li|h1|h2|h3|h4|section|tr)>", "\n")
+                .replaceAll("(?is)<[^>]+>", " ");
+        value = value.replace("&nbsp;", " ").replace("&amp;", "&")
+                .replace("&quot;", "\"").replace("&#39;", "'")
+                .replace("&lt;", "<").replace("&gt;", ">");
+        return value.replaceAll("[\\t\\x0B\\f\\r ]+", " ")
+                .replaceAll(" *\\n *", "\n")
+                .replaceAll("\\n{3,}", "\n\n").trim();
+    }
+
+    private String normalizeSearchText(String value) {
+        if (value == null) return "";
+        String normalized = java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .toLowerCase(Locale.US)
+                .replaceAll("[^a-z0-9]+", " ")
+                .trim();
+        return normalized;
+    }
+
+    private String collectorCore(String number) {
+        if (number == null) return "";
+        String left = number.split("/")[0].replaceAll("[^A-Za-z0-9]", "");
+        return left.replaceFirst("^0+(?!$)", "");
+    }
+
+    private String decodeSearchUrl(String value) {
+        if (value == null) return "";
+        String decoded = value.replace("&amp;", "&").replace("\\/", "/");
+        try { decoded = URLDecoder.decode(decoded, "UTF-8"); } catch (Exception ignored) {}
+        java.util.regex.Matcher redirect = java.util.regex.Pattern.compile("[?&](?:url|u|r)=([^&]+)").matcher(decoded);
+        if (redirect.find()) {
+            try { decoded = URLDecoder.decode(redirect.group(1), "UTF-8"); } catch (Exception ignored) {}
+        }
+        return decoded;
+    }
+
+    private java.util.List<String> mypCandidateUrls(String html) {
+        java.util.LinkedHashSet<String> urls = new java.util.LinkedHashSet<String>();
+        if (html == null) return new java.util.ArrayList<String>();
+        java.util.regex.Matcher direct = java.util.regex.Pattern.compile(
+                "https?://(?:www\\.)?mypcards\\.com/pokemon/(?:preco|produto)/\\d+/[a-z0-9-]+",
+                java.util.regex.Pattern.CASE_INSENSITIVE).matcher(html.replace("\\/", "/"));
+        while (direct.find()) urls.add(direct.group());
+        java.util.regex.Matcher href = java.util.regex.Pattern.compile("href=[\\\"']([^\\\"']+)[\\\"']", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(html);
+        while (href.find()) {
+            String decoded = decodeSearchUrl(href.group(1));
+            java.util.regex.Matcher nested = java.util.regex.Pattern.compile(
+                    "https?://(?:www\\.)?mypcards\\.com/pokemon/(?:preco|produto)/\\d+/[a-z0-9-]+",
+                    java.util.regex.Pattern.CASE_INSENSITIVE).matcher(decoded);
+            if (nested.find()) urls.add(nested.group());
+        }
+        return new java.util.ArrayList<String>(urls);
+    }
+
+    private Double parseBrlAfterLabel(String text, String label) {
+        if (text == null) return null;
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
+                java.util.regex.Pattern.quote(label) + "[\\s\\S]{0,100}?R\\$\\s*([0-9.]+(?:,[0-9]{1,2})?)",
+                java.util.regex.Pattern.CASE_INSENSITIVE);
+        java.util.regex.Matcher matcher = pattern.matcher(text);
+        if (!matcher.find()) return null;
+        try { return Double.parseDouble(matcher.group(1).replace(".", "").replace(',', '.')); }
+        catch (Exception ignored) { return null; }
+    }
+
+    private JSONObject queryMypCardsPrice(String cardName, String cardNumber, String setName, String setId) throws Exception {
+        String numberCore = collectorCore(cardNumber);
+        String[] queries = new String[] {
+                "site:mypcards.com/pokemon/preco \"" + cardName + "\" \"" + cardNumber + "\" \"" + setName + "\"",
+                "site:mypcards.com/pokemon/preco \"" + cardName + "\" \"" + numberCore + "\" \"" + setId + "\"",
+                "site:mypcards.com/pokemon/produto \"" + cardName + "\" \"" + cardNumber + "\" \"" + setName + "\""
+        };
+        java.util.LinkedHashSet<String> candidates = new java.util.LinkedHashSet<String>();
+        StringBuilder diagnostics = new StringBuilder();
+        for (String query : queries) {
+            try {
+                String searchUrl = "https://www.bing.com/search?q=" + URLEncoder.encode(query, "UTF-8");
+                candidates.addAll(mypCandidateUrls(fetchPublicText(searchUrl)));
+            } catch (Exception error) {
+                diagnostics.append("Busca: ").append(error.getMessage()).append("; ");
+            }
+        }
+        String normalizedName = normalizeSearchText(cardName);
+        String normalizedSet = normalizeSearchText(setName);
+        for (String originalUrl : candidates) {
+            String historyUrl = originalUrl.replace("/produto/", "/preco/");
+            try {
+                String html = fetchPublicText(historyUrl);
+                String text = htmlToPlainText(html);
+                String normalized = normalizeSearchText(text);
+                boolean nameOk = normalizedName.length() == 0 || normalized.contains(normalizedName);
+                boolean numberOk = numberCore.length() == 0 || normalized.contains(" " + numberCore + " ")
+                        || normalized.contains(numberCore + " ") || normalized.contains(" " + numberCore);
+                boolean setOk = normalizedSet.length() == 0 || normalized.contains(normalizedSet)
+                        || (setId != null && setId.length() > 0 && normalized.contains(normalizeSearchText(setId)));
+                if (!nameOk || !numberOk) continue;
+                Double median = parseBrlAfterLabel(text, "Mediana MYP");
+                if (median != null && median > 0) {
+                    JSONObject result = new JSONObject();
+                    result.put("brl", median);
+                    result.put("metric", "median");
+                    result.put("url", historyUrl);
+                    result.put("matchedCode", cardNumber);
+                    result.put("diagnostic", setOk ? "Correspondência exata no MYP Cards." : "Nome e número conferidos; coleção aproximada.");
+                    return result;
+                }
+                String productUrl = originalUrl.replace("/preco/", "/produto/");
+                String productText = htmlToPlainText(fetchPublicText(productUrl));
+                java.util.regex.Matcher money = java.util.regex.Pattern.compile("R\\$\\s*([0-9.]+(?:,[0-9]{1,2})?)").matcher(productText);
+                double lowest = Double.MAX_VALUE;
+                int count = 0;
+                while (money.find() && count < 40) {
+                    try {
+                        double value = Double.parseDouble(money.group(1).replace(".", "").replace(',', '.'));
+                        if (value > 0 && value < lowest) lowest = value;
+                    } catch (Exception ignored) {}
+                    count++;
+                }
+                if (lowest < Double.MAX_VALUE) {
+                    JSONObject result = new JSONObject();
+                    result.put("brl", lowest);
+                    result.put("metric", "lowest");
+                    result.put("url", productUrl);
+                    result.put("matchedCode", cardNumber);
+                    result.put("diagnostic", "Mediana indisponível; usada a menor oferta visível no MYP Cards.");
+                    return result;
+                }
+            } catch (Exception error) {
+                diagnostics.append(error.getMessage()).append("; ");
+            }
+        }
+        throw new IllegalStateException("Carta não localizada no MYP Cards. " + diagnostics.toString());
+    }
+
+    private void requestMypCardsNative(final String requestId, final String cardName, final String cardNumber, final String setName, final String setId) {
+        backgroundExecutor.execute(new Runnable() {
+            @Override public void run() {
+                try {
+                    JSONObject result = queryMypCardsPrice(cardName, cardNumber, setName, setId);
+                    final String payload = result.toString();
+                    runJavascript("window.receiveMypCardsPrice&&window.receiveMypCardsPrice(" + JSONObject.quote(requestId) + ",true," + JSONObject.quote(payload) + ",null);");
+                } catch (Exception error) {
+                    String message = error.getMessage() == null ? "Falha ao consultar o MYP Cards." : error.getMessage();
+                    runJavascript("window.receiveMypCardsPrice&&window.receiveMypCardsPrice(" + JSONObject.quote(requestId) + ",false,null," + JSONObject.quote(message) + ");");
+                }
+            }
+        });
+    }
+
     public final class AppBridge {
         @JavascriptInterface
         public double getTopInsetCss() {
@@ -529,6 +773,11 @@ public final class MainActivity extends Activity {
                     startLigaProbe(requestId, url);
                 }
             });
+        }
+
+        @JavascriptInterface
+        public void requestMypCards(final String requestId, final String cardName, final String cardNumber, final String setName, final String setId) {
+            requestMypCardsNative(requestId, cardName, cardNumber, setName, setId);
         }
 
         @JavascriptInterface
