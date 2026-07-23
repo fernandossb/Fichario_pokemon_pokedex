@@ -16,13 +16,20 @@ const PRICE_CACHE_KEY = 'fichario-pokemon-price-cache-v1';
 const FX_CACHE_KEY = 'fichario-pokemon-fx-cache-v1';
 const LIGA_SET_CACHE_KEY = 'fichario-pokemon-liga-set-cache-v1';
 const PRICE_LOGIC_VERSION_KEY = 'fichario-pokemon-price-logic-version';
-const PRICE_LOGIC_VERSION = 12;
+const PRICE_LOGIC_VERSION = 13;
 const PRICE_CACHE_TTL = 24 * 60 * 60 * 1000;
 const FX_CACHE_TTL = 24 * 60 * 60 * 1000;
 const TCGDEX_API_BASE = 'https://api.tcgdex.net/v2/pt-br';
 const TCGDEX_API_FALLBACK = 'https://api.tcgdex.net/v2/en';
 const TCGDEX_API_JAPANESE = 'https://api.tcgdex.net/v2/ja';
 const FX_API_BASE = 'https://api.frankfurter.dev/v2';
+const CENTRAL_PRICE_BASE = 'https://raw.githubusercontent.com/fernandossb/pokemon-price-database/main/output';
+const CENTRAL_PRICE_STATUS_URL = `${CENTRAL_PRICE_BASE}/status.json`;
+const CENTRAL_PRICE_DATA_URL = `${CENTRAL_PRICE_BASE}/prices-current.json`;
+const CENTRAL_PRICE_DB_NAME = 'fichario-pokemon-central-prices-v1';
+const CENTRAL_PRICE_DB_STORE = 'data';
+const CENTRAL_PRICE_DB_KEY = 'current';
+const CENTRAL_PRICE_SYNC_TTL = 6 * 60 * 60 * 1000;
 const LIGA_POKEMON_BASES = ['https://www.ligapokemon.com.br/', 'https://ligapokemon.com.br/'];
 const TAB_ITEMS = [
   ['dashboard', 'Painel'],
@@ -62,6 +69,10 @@ let lastPriceDiagnostic = '';
 let selectedDeckId = null;
 let latestUpdateInfo = null;
 let updateCheckInProgress = false;
+let centralPriceData = { meta: {}, prices: {} };
+let centralPriceStatus = {};
+let centralPriceSyncing = false;
+let centralPriceLastCheck = 0;
 
 const ui = {
   tab: 'dashboard',
@@ -557,6 +568,130 @@ function cardmarketValidation(card, remote, kind) {
   };
 }
 
+
+function openCentralPriceDatabase() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) return reject(new Error('IndexedDB indisponível'));
+    const request = indexedDB.open(CENTRAL_PRICE_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(CENTRAL_PRICE_DB_STORE)) db.createObjectStore(CENTRAL_PRICE_DB_STORE);
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('Falha ao abrir banco de preços'));
+  });
+}
+
+async function loadCentralPriceCache() {
+  try {
+    const db = await openCentralPriceDatabase();
+    const cached = await new Promise((resolve, reject) => {
+      const tx = db.transaction(CENTRAL_PRICE_DB_STORE, 'readonly');
+      const req = tx.objectStore(CENTRAL_PRICE_DB_STORE).get(CENTRAL_PRICE_DB_KEY);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    if (cached?.prices && typeof cached.prices === 'object') {
+      centralPriceData = cached;
+      centralPriceStatus = cached.meta || {};
+    }
+  } catch (_) {}
+  return centralPriceData;
+}
+
+async function saveCentralPriceCache(payload) {
+  const db = await openCentralPriceDatabase();
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(CENTRAL_PRICE_DB_STORE, 'readwrite');
+    tx.objectStore(CENTRAL_PRICE_DB_STORE).put(payload, CENTRAL_PRICE_DB_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+}
+
+function centralPriceGeneratedAt() {
+  return centralPriceData?.meta?.generatedAt || centralPriceStatus?.generatedAt || null;
+}
+
+function centralFinishKey(finish) {
+  const kind = finishKind(finish);
+  if (kind === 'holo') return 'holo';
+  if (kind === 'reverse') return 'reverse';
+  return 'normal';
+}
+
+function centralPriceQuote(cardId, finish = 'comum') {
+  const key = `${cardId}::${centralFinishKey(finish)}`;
+  const item = centralPriceData?.prices?.[key];
+  if (!item || !hasFiniteNumber(item.priceBrl) || Number(item.priceBrl) <= 0) return null;
+  const confidenceNumber = Math.max(0, Math.min(100, Number(item.confidence) || 0));
+  return {
+    brl: Number(item.priceBrl),
+    value: Number(item.priceBrl),
+    currency: 'BRL',
+    label: 'Preço Brasil',
+    source: 'preco-brasil',
+    provider: 'Pokémon Price Database Brasil',
+    fetchedAt: new Date(item.updatedAt || centralPriceGeneratedAt() || Date.now()).getTime(),
+    confidence: 'verified',
+    confidencePercent: confidenceNumber,
+    verified: true,
+    usable: true,
+    fingerprint: ['preco-brasil', key, item.priceBrl, item.updatedAt || centralPriceGeneratedAt() || ''].join('|'),
+    validation: {
+      reasons: confidenceNumber >= 70 ? [] : [`Confiança do banco central: ${confidenceNumber}%`],
+      checks: ['ID exato', 'Acabamento', `${Array.isArray(item.sources) ? item.sources.length : 0} fonte(s)`],
+    },
+    sources: Array.isArray(item.sources) ? item.sources : [],
+    central: true,
+  };
+}
+
+async function syncCentralPrices(force = false) {
+  if (centralPriceSyncing) return false;
+  if (!force && Date.now() - centralPriceLastCheck < CENTRAL_PRICE_SYNC_TTL) return false;
+  centralPriceSyncing = true;
+  centralPriceLastCheck = Date.now();
+  try {
+    const status = await fetchJsonWithTimeout(`${CENTRAL_PRICE_STATUS_URL}?t=${Date.now()}`, 30000);
+    if (!status || status.status !== 'complete' || !status.generatedAt) throw new Error('Banco central ainda não está completo.');
+    centralPriceStatus = status;
+    const localTime = new Date(centralPriceData?.meta?.generatedAt || 0).getTime();
+    const remoteTime = new Date(status.generatedAt).getTime();
+    if (!force && Number.isFinite(localTime) && Number.isFinite(remoteTime) && localTime >= remoteTime && Object.keys(centralPriceData?.prices || {}).length) {
+      return false;
+    }
+    const payload = await fetchJsonWithTimeout(`${CENTRAL_PRICE_DATA_URL}?t=${Date.now()}`, 120000);
+    if (!payload?.prices || typeof payload.prices !== 'object') throw new Error('Tabela central inválida.');
+    payload.meta = payload.meta || status;
+    centralPriceData = payload;
+    centralPriceStatus = payload.meta;
+    await saveCentralPriceCache(payload);
+    let changed = false;
+    for (const cardId of Object.keys(state?.entries || {})) changed = persistAutomaticPricesForCard(cardId, false) || changed;
+    if (changed) saveState();
+    if (ui.tab === 'dashboard') renderKeepingScroll();
+    if (force) notify(`Preço Brasil atualizado · ${Object.keys(payload.prices).length.toLocaleString('pt-BR')} variantes.`);
+    return true;
+  } catch (error) {
+    if (force) notify(`Banco de preços: ${error.message}`);
+    return false;
+  } finally {
+    centralPriceSyncing = false;
+  }
+}
+
+function centralPriceStatusPanel() {
+  const meta = centralPriceStatus || centralPriceData?.meta || {};
+  const variants = Number(meta.variantsPriced) || Object.keys(centralPriceData?.prices || {}).length;
+  const cards = Number(meta.cardsInCatalog) || 0;
+  const unmatched = Number(meta.unmatched) || 0;
+  const date = meta.generatedAt ? formatPriceDate(meta.generatedAt) : 'ainda não sincronizado';
+  return `<div class="catalog-last-result"><strong>Banco Preço Brasil</strong><br>${variants.toLocaleString('pt-BR')} variantes com preço${cards ? ` · ${cards.toLocaleString('pt-BR')} cartas no catálogo` : ''}${unmatched ? ` · ${unmatched.toLocaleString('pt-BR')} pendências` : ''}<br>Atualizado: ${esc(date)}</div>`;
+}
+
 function cardmarketMetric(cardmarket, kind) {
   const holo = kind === 'holo' || kind === 'reverse';
   const candidates = holo
@@ -640,6 +775,8 @@ function fxRate(currency) {
 }
 
 function automaticPriceQuote(cardId, finish = 'comum') {
+  const central = centralPriceQuote(cardId, finish);
+  if (central) return central;
   const cached = priceCache[cardId];
   const card = cardMap.get(cardId);
   const kind = finishKind(finish);
@@ -803,6 +940,21 @@ async function fetchCardPricing(cardId, force = false, finish = 'comum') {
   const request = (async () => {
     const card = cardMap.get(cardId);
     if (!card) throw new Error('Carta não encontrada no catálogo local.');
+    if (force) await syncCentralPrices(false);
+    const central = centralPriceQuote(cardId, finish);
+    if (central) {
+      const previous = priceCache[cardId] || {};
+      priceCache[cardId] = {
+        ...previous,
+        logicVersion: PRICE_LOGIC_VERSION,
+        fetchedAt: Date.now(),
+        quotes: { ...(previous.quotes || {}), [kind]: { ...central, kind, fetchedAt: Date.now() } },
+        diagnostics: central.validation?.reasons || [],
+        identity: { id: card.id, setId: card.setId, localId: card.localId, name: card.name },
+      };
+      savePriceCache();
+      return priceCache[cardId];
+    }
     await ensureFxRates(['EUR', 'USD'], force);
     const cardmarket = await fetchBestMarketPricing(cardId, finish);
     cardmarket.kind = kind;
@@ -950,6 +1102,7 @@ async function init() {
     catalogUpdateMeta = loadCatalogUpdateMeta();
     catalogUpdating = false;
     loadPricingState();
+    await loadCentralPriceCache();
     state = loadState();
     // Ao mudar para a média brasileira, removemos uma vez os valores internacionais antigos.
     const storedLogicVersion = Number(localStorage.getItem(PRICE_LOGIC_VERSION_KEY) || 0);
@@ -991,6 +1144,7 @@ async function init() {
     document.getElementById('loading').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     setTimeout(() => checkForAppUpdate(false), 1800);
+    setTimeout(() => syncCentralPrices(false), 2300);
   } catch (error) {
     document.getElementById('loading').innerHTML = `
       <strong>Não consegui abrir o fichário</strong>
@@ -1362,11 +1516,13 @@ function pricingPanel() {
   return `<section class="price-update-card">
     <div class="catalog-update-heading">
       <div><strong>Preços de mercado</strong><span>${counts.priced} de ${counts.owned} cartas próprias com valor aceito${counts.pending ? ` · ${counts.pending} aguardando validação` : ''}${latest ? ` · última consulta ${esc(formatPriceDate(latest))}` : ''}</span></div>
-      <span class="online-badge">Cardmarket + TCGplayer</span>
+      <span class="online-badge">Preço Brasil + fallback</span>
     </div>
-    <p>Prioridade: valor manual → Cardmarket Trend → médias de 30/7/1 dia → média/menor oferta → TCGplayer. A identificação valida Pokémon, número, coleção, ilustrador, acabamento e status promocional.</p>
+    <p>Prioridade: valor manual → banco central Preço Brasil → Cardmarket/TCGplayer como reserva. O banco central é atualizado pelo GitHub e fica salvo no aparelho para uso offline.</p>
+    ${centralPriceStatusPanel()}
     ${priceUpdating ? `<div class="catalog-progress"><div class="progress"><span style="width:${progress}%"></span></div><small>${esc(priceUpdateMessage || 'Consultando preços...')}</small></div>` : ''}
-    <button class="primary-btn" ${priceUpdating ? 'disabled' : ''} onclick="startOwnedPriceUpdate()">${priceUpdating ? 'Atualizando...' : 'Atualizar preços da coleção (busca completa)'}</button>
+    <button class="primary-btn" ${priceUpdating ? 'disabled' : ''} onclick="startOwnedPriceUpdate()">${priceUpdating ? 'Atualizando...' : 'Atualizar preços da coleção'}</button>
+    <button class="secondary-btn" ${centralPriceSyncing ? 'disabled' : ''} onclick="syncCentralPrices(true)">${centralPriceSyncing ? 'Sincronizando...' : 'Sincronizar Banco Preço Brasil'}</button>
     ${priceUpdateFailures ? `<div class="catalog-last-result">${priceUpdateFailures} carta(s) continuam sem dados públicos de mercado nesta tentativa.</div>` : ''}
   </section>`;
 }
