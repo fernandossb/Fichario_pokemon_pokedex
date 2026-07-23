@@ -1,20 +1,13 @@
-PATCH v0.23 — Imagens locais
+FICHÁRIO POKÉMON v1.0.0 — BASE LIMPA
 
-COMO APLICAR
-1. Extraia este ZIP.
-2. Copie todo o conteúdo extraído.
-3. Cole na pasta principal do repositório.
-4. Confirme "Substituir os arquivos no destino".
-5. No GitHub Desktop, confirme que somente os arquivos deste patch foram alterados.
-6. Commit: Versão 0.23 - imagens locais
-7. Push origin.
-8. Aguarde o Actions ficar verde e atualize pelo aplicativo.
+Este pacote é o projeto completo consolidado e deve substituir o conteúdo do repositório, preservando somente a pasta .git local.
 
-FUNCIONALIDADES
-- Câmera e galeria.
-- Recorte central automático no formato da carta.
-- Compressão JPEG.
-- Trocar e remover imagem.
-- Armazenamento local em IndexedDB.
-- Inclusão das imagens no backup.
-- Restauração das imagens ao importar o backup.
+Fluxo:
+1. Faça backup da pasta atual do repositório.
+2. No GitHub Desktop, aborte qualquer merge em andamento.
+3. Substitua o conteúdo do repositório por este projeto, sem apagar .git.
+4. Commit to main.
+5. Push origin.
+6. Aguarde o GitHub Actions gerar o APK assinado.
+
+A assinatura continua usando os mesmos Secrets do GitHub.

@@ -38,8 +38,12 @@ button { cursor: pointer; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.sticky-shell {
+  position: sticky; top: var(--safe-top); z-index: 30; background: var(--navy);
+  box-shadow: 0 5px 14px rgba(7,31,65,.18);
+}
 .app-header {
-  position: sticky; top: var(--safe-top); z-index: 20; color: white; padding: 15px 18px 14px;
+  position: relative; z-index: 2; color: white; padding: 15px 18px 14px;
   background: linear-gradient(145deg, var(--navy-deep), var(--navy));
   border-bottom: 4px solid var(--yellow);
 }
@@ -50,7 +54,7 @@ button { cursor: pointer; }
 .header-icon { width: 43px; height: 43px; border: 1px solid #5d7fb1; border-radius: 50%; background: #123d76; color: white; font-size: 25px; }
 
 .tabs {
-  position: sticky; top: calc(var(--safe-top) + 112px); z-index: 19; display: flex; gap: 8px; overflow-x: auto;
+  position: relative; z-index: 1; display: flex; gap: 8px; overflow-x: auto;
   padding: 10px 16px 12px; background: var(--navy); scrollbar-width: none;
 }
 .tabs::-webkit-scrollbar { display: none; }
@@ -456,4 +460,268 @@ button, input, select, textarea { font: inherit; }
 }
 @media (min-width: 900px) {
   .registration-image-frame { width: 400px; }
+}
+
+
+/* v1.2 — performance e cabeçalho contínuo */
+.card-row { content-visibility: auto; contain-intrinsic-size: 118px; contain: layout paint style; }
+.card-thumb { image-rendering: auto; }
+.card-list { contain: layout style; }
+#cardSearchResults { min-height: 120px; }
+.sticky-shell::after { content:''; position:absolute; left:0; right:0; bottom:-1px; height:2px; background:var(--navy); pointer-events:none; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior:auto !important; animation-duration:.01ms !important; } }
+
+
+/* =========================================================
+   Tema Gengar v1.3 — camada visual, sem alterar a lógica
+   ========================================================= */
+:root {
+  --navy: #1d0830;
+  --navy-deep: #09040f;
+  --blue: #a92eff;
+  --sky: #d9b8ff;
+  --yellow: #c752ff;
+  --cream: #08050d;
+  --surface: #13091d;
+  --ink: #f8f3ff;
+  --muted: #b4a6c3;
+  --line: #4e2468;
+  --success: #2db46e;
+  --danger: #ff4b63;
+  --shadow: 0 10px 28px rgba(0,0,0,.38), 0 0 0 1px rgba(190,74,255,.08);
+  --ghost-glow: 0 0 18px rgba(183,55,255,.35);
+  color-scheme: dark;
+}
+html, body { background: #08050d; color: var(--ink); }
+body {
+  background:
+    radial-gradient(circle at 82% 8%, rgba(153,39,218,.16), transparent 28%),
+    radial-gradient(circle at 18% 38%, rgba(94,20,145,.11), transparent 25%),
+    linear-gradient(180deg,#0b0611 0%,#07040b 100%);
+}
+body::after {
+  content:''; position:fixed; inset:0; pointer-events:none; z-index:-1; opacity:.22;
+  background-image: radial-gradient(circle, rgba(213,145,255,.55) 0 1px, transparent 1.5px);
+  background-size: 34px 34px; animation: ghostDrift 22s linear infinite;
+}
+@keyframes ghostDrift { from { transform:translateY(0) } to { transform:translateY(-34px) } }
+@media (prefers-reduced-motion: reduce) { *,*::before,*::after { animation-duration:.01ms!important; animation-iteration-count:1!important; scroll-behavior:auto!important; } }
+.loading-screen { color:#c8b6d8; background:radial-gradient(circle at 50% 35%,#37104d 0,#0a050f 45%,#050308 100%); }
+.loading-screen strong { color:#f5eaff; }
+.pokeball-loader { border-color:#b738ff; border-right-color:transparent; box-shadow:0 0 22px rgba(183,56,255,.5); }
+.sticky-shell { background:#09040f; box-shadow:0 7px 22px rgba(0,0,0,.48); border-bottom:1px solid rgba(190,75,255,.3); }
+.app-header {
+  min-height:151px; overflow:hidden; padding:20px 18px 18px;
+  background:
+    linear-gradient(90deg,rgba(7,3,12,.97) 0%,rgba(20,5,34,.91) 53%,rgba(42,8,64,.7) 100%),
+    radial-gradient(circle at 78% 43%,#5f147d 0,transparent 31%), #0b0512;
+  border-bottom:1px solid #6c268b;
+}
+.app-header::before { content:'';position:absolute;inset:auto 0 0;height:2px;background:linear-gradient(90deg,transparent,#c54aff,#7a1fac,transparent);box-shadow:0 0 16px #b42dff; }
+.gengar-header-art {
+  position:absolute; right:54px; bottom:-8px; width:142px; height:142px; object-fit:contain;
+  image-rendering:auto; filter:drop-shadow(0 0 12px rgba(192,64,255,.72)) drop-shadow(0 12px 14px rgba(0,0,0,.55));
+  transform-origin:50% 90%; animation:gengarFloat 4.8s ease-in-out infinite;
+}
+@keyframes gengarFloat { 0%,100%{transform:translateY(2px) rotate(-1deg)} 50%{transform:translateY(-5px) rotate(1deg)} }
+.gengar-atmosphere { position:absolute; inset:0; overflow:hidden; pointer-events:none; }
+.gengar-atmosphere span { position:absolute; border-radius:50%; background:#ae3cff; filter:blur(11px); opacity:.18; animation:mist 7s ease-in-out infinite; }
+.gengar-atmosphere span:nth-child(1){width:90px;height:22px;right:22px;bottom:13px}.gengar-atmosphere span:nth-child(2){width:55px;height:15px;right:137px;bottom:37px;animation-delay:-2s}.gengar-atmosphere span:nth-child(3){width:80px;height:18px;right:76px;top:19px;animation-delay:-4s}
+@keyframes mist { 0%,100%{transform:translateX(-5px);opacity:.1}50%{transform:translateX(9px);opacity:.28} }
+.kicker { color:#db61ff; text-shadow:0 0 12px rgba(207,74,255,.4); }
+.header-row { position:relative; z-index:2; min-height:88px; }
+.header-row > div { max-width:58%; }
+.header-row h1 { color:#fff; font-size:30px; letter-spacing:-.025em; text-shadow:0 2px 13px rgba(0,0,0,.65); }
+.header-row p { color:#d0badf; }
+.header-icon { position:relative; z-index:3; width:46px;height:46px;border-radius:13px;border:1px solid #a04dc3;background:rgba(25,8,38,.78);box-shadow:0 0 18px rgba(158,43,222,.2); }
+.tabs { gap:7px; padding:8px 10px 10px; background:rgba(9,4,15,.98); border-top:1px solid rgba(177,61,229,.17); }
+.tab {
+  flex:1 0 68px; min-width:68px; min-height:62px; padding:7px 5px 6px; border-radius:10px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+  border:1px solid #4a255d; background:linear-gradient(180deg,#160a20,#0e0715); color:#c8b9d4;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.025); transition:transform .15s,background .2s,border-color .2s,box-shadow .2s;
+}
+.tab:active { transform:scale(.96); }
+.tab-icon { width:23px;height:23px;display:grid;place-items:center; }
+.tab-icon svg { width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round; }
+.tab-label { font-size:9px; font-weight:800; line-height:1; white-space:nowrap; }
+.tab.active { color:#fff; border-color:#b940ed; background:linear-gradient(145deg,#74219b,#a52ad7); box-shadow:0 0 18px rgba(183,48,242,.38),inset 0 1px 0 rgba(255,255,255,.18); }
+.content { background:transparent; padding-top:19px; }
+.screen { animation:screenReveal .24s ease-out both; }
+@keyframes screenReveal { from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none} }
+.screen-title,.section-title,.region-heading h3,.pokemon-hero h2,.modal h2,.registration-section h3,.registration-section-title strong,.catalog-update-heading strong { color:#f6effb; }
+.screen-title::after { content:'  👻'; font-size:.65em; opacity:.8; }
+.screen-subtitle,.region-heading span { color:#aa9ab8; }
+.stat-card,.card-item,.set-card,.pokemon-tile,.registration-section,.catalog-update-card,.price-update-card,.automatic-price-card,.notice,.modal-sheet {
+  background:linear-gradient(145deg,rgba(24,10,34,.98),rgba(13,7,20,.98)); border-color:#4e2762; color:#f5eff9; box-shadow:var(--shadow);
+}
+.stat-card { border-top-color:#9e2bd0; }
+.stat-card.wide { border-top-color:#d050ff; }
+.stat-value,.card-name,.set-name,.pokemon-name,.registration-placeholder,.read-only-field { color:#f6effb; }
+.field,input,select,textarea,.read-only-field { background:#12091b; color:#f5effa; border-color:#58306c; }
+.field::placeholder,input::placeholder,textarea::placeholder { color:#887994; }
+.filter-pill,.variant-chip { background:#160a20;color:#cabbd3;border-color:#573069; }
+.filter-pill.active,.variant-chip.active { background:linear-gradient(145deg,#6b1e91,#aa2ddb);border-color:#be4aee;color:#fff;box-shadow:0 0 13px rgba(184,52,239,.28); }
+.primary-btn,.mini-btn { background:linear-gradient(145deg,#6e1c96,#ad2ee0); box-shadow:0 6px 18px rgba(145,32,192,.28); }
+.secondary-btn { background:#13091b;color:#f2e9f8;border-color:#67407a; }
+.danger-btn { background:#1a0911;color:#ff7184;border-color:#9c2940; }
+.card-item { border-color:#4c275e; }
+.card-item:hover { border-color:#873bad; }
+.card-thumb { background:#08040c; box-shadow:0 6px 14px rgba(0,0,0,.4); }
+.quantity-btn { background:linear-gradient(145deg,#2d1040,#611682); color:#fff; border:1px solid #79319b; }
+.badge { background:#251330;color:#d4c1df; }
+.badge.yellow,.badge.purple { background:#3d1550;color:#f2a8ff; }
+.badge.green,.badge.price { background:#103421;color:#72e19b; }
+.progress { background:#22132c; }
+.progress > span { background:linear-gradient(90deg,#75239b,#cc48ff);box-shadow:0 0 10px rgba(195,61,255,.5); }
+.pokemon-tile { min-height:143px; }
+.pokemon-tile:not(.owned) { opacity:.58; }
+.modal-backdrop { background:rgba(3,1,6,.8);backdrop-filter:blur(4px); }
+.modal-sheet { border:1px solid #6d3384;border-bottom:0; }
+.toggle-card { background:#140a1d;border-color:#553067; }
+.toggle-card strong { color:#cfbfda; }
+.toggle-card input:checked + .toggle-ui { background:#a52bd7; }
+.catalog-update-card,.price-update-card { background:linear-gradient(145deg,#1b0b27,#100817); }
+.online-badge { background:#103720;color:#72e79c; }
+.automatic-price-card { background:#0d2519;border-color:#285f42; }
+.automatic-price-card strong { color:#76ef9f; }
+.notice { border-left-color:#bd3df0;background:#160b20;color:#bbaac6; }
+.back-btn { color:#ca5cff; }
+.price-refresh-btn { background:#6f1f94; }
+@media(max-width:430px){
+  .app-header{min-height:143px}.gengar-header-art{width:126px;height:126px;right:47px}.header-row h1{font-size:28px}.tab{min-width:65px;flex-basis:65px}.tabs{padding-left:7px;padding-right:7px}
+}
+
+/* v1.3.2 — fundo geral Gengar + Pokédex registrada nítida */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(8, 5, 13, .80), rgba(8, 5, 13, .80)),
+    url('gengar-wallpaper.webp');
+  background-position: center top;
+  background-repeat: no-repeat;
+  background-size: cover;
+  opacity: .20;
+}
+.app { position: relative; z-index: 1; }
+
+/* O sprite antigo continua destacado no cabeçalho; o wallpaper só aparece fora dele. */
+.app-header { isolation: isolate; }
+
+/* Pokémon registrados: cartão branco e sprite 100% nítido. */
+.pokemon-tile:not(.missing) {
+  background: #ffffff !important;
+  border-color: #d8dce5 !important;
+  opacity: 1 !important;
+  box-shadow: 0 6px 18px rgba(0,0,0,.28) !important;
+}
+.pokemon-tile:not(.missing) img {
+  opacity: 1 !important;
+  filter: none !important;
+}
+.pokemon-tile:not(.missing) .pokemon-number { color: #697386 !important; }
+.pokemon-tile:not(.missing) .pokemon-name { color: #15223a !important; }
+
+/* Pokémon ainda não registrados permanecem discretos/translúcidos. */
+.pokemon-tile.missing { opacity: .42 !important; }
+.pokemon-tile.missing img { opacity: .48 !important; filter: saturate(.75); }
+
+
+/* =========================================================
+   v1.3.3 — cabeçalho edge-to-edge e contraste em superfícies claras
+   ========================================================= */
+
+/* O WebView agora ocupa a barra de status. A altura segura passa a fazer
+   parte do cabeçalho, eliminando a faixa vazia acima dele. */
+body {
+  padding-top: 0 !important;
+}
+.sticky-shell {
+  top: 0 !important;
+}
+.app-header {
+  min-height: calc(151px + var(--safe-top));
+  padding-top: calc(20px + var(--safe-top));
+}
+
+/* A antiga faixa isolada do safe-area não é mais necessária: o próprio
+   cabeçalho fornece o fundo sob relógio, sinal, Wi‑Fi e bateria. */
+body::before {
+  top: 0;
+}
+
+/* Superfícies claras mantêm texto roxo-escuro com contraste forte.
+   As regras são específicas para não alterar cartões escuros do tema. */
+.pokemon-tile:not(.missing),
+.deck-card-row,
+.deck-picker button,
+.deck-validation,
+.registration-image-frame,
+.pokemon-hero img,
+.white-surface,
+.light-surface {
+  --light-surface-ink: #2b0b3d;
+  --light-surface-muted: #65526f;
+  color: var(--light-surface-ink) !important;
+}
+
+.pokemon-tile:not(.missing) .pokemon-number,
+.pokemon-tile:not(.missing) .pokemon-name,
+.pokemon-tile:not(.missing) strong,
+.pokemon-tile:not(.missing) span:not(.pokemon-owned-count),
+.deck-card-row .deck-card-info strong,
+.deck-card-row .deck-card-info span,
+.deck-card-row .deck-qty b,
+.deck-picker button strong,
+.deck-picker button span,
+.deck-validation,
+.white-surface h1,
+.white-surface h2,
+.white-surface h3,
+.white-surface strong,
+.white-surface span,
+.white-surface p,
+.white-surface small,
+.light-surface h1,
+.light-surface h2,
+.light-surface h3,
+.light-surface strong,
+.light-surface span,
+.light-surface p,
+.light-surface small {
+  color: var(--light-surface-ink) !important;
+  text-shadow: none !important;
+}
+
+.pokemon-tile:not(.missing) .pokemon-number,
+.deck-card-row .deck-card-info span,
+.deck-picker button span,
+.white-surface small,
+.white-surface .muted,
+.light-surface small,
+.light-surface .muted {
+  color: var(--light-surface-muted) !important;
+}
+
+/* Inputs claros eventualmente criados por componentes futuros também
+   recebem texto legível automaticamente quando marcados como light-surface. */
+.white-surface input,
+.white-surface select,
+.white-surface textarea,
+.light-surface input,
+.light-surface select,
+.light-surface textarea {
+  color: #2b0b3d !important;
+  caret-color: #6f1f94;
+}
+
+@media (max-width: 430px) {
+  .app-header {
+    min-height: calc(143px + var(--safe-top));
+    padding-top: calc(20px + var(--safe-top));
+  }
 }

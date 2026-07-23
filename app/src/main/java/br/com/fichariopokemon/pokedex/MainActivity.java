@@ -79,9 +79,17 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(Color.rgb(7, 31, 65));
-        getWindow().setNavigationBarColor(Color.rgb(255, 248, 220));
-        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        // O conteúdo ocupa também a área da barra de status. O cabeçalho Web ajusta
+        // internamente o safe-area para que títulos e botões nunca fiquem sob os ícones.
+        getWindow().setStatusBarColor(Color.TRANSPARENT);
+        getWindow().setNavigationBarColor(Color.rgb(8, 5, 13));
+        int systemUiFlags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Barra de navegação escura do Tema Gengar: ícones claros.
+            systemUiFlags &= ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        }
+        getWindow().getDecorView().setSystemUiVisibility(systemUiFlags);
         topInsetCss = systemBarHeightCss("status_bar_height");
         bottomInsetCss = systemBarHeightCss("navigation_bar_height");
 

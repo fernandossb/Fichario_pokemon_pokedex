@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-  <meta name="theme-color" content="#0b2d5c">
+  <meta name="theme-color" content="#12051f">
   <title>Fichário Pokémon BR</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -15,18 +15,21 @@
   </div>
 
   <div id="app" class="app hidden">
-    <header class="app-header">
-      <div class="kicker">POKÉMON TCG BRASIL</div>
-      <div class="header-row">
-        <div>
-          <h1>Fichário digital</h1>
-          <p id="header-status">Coleção local protegida</p>
+    <div class="sticky-shell">
+      <header class="app-header">
+        <div class="gengar-atmosphere" aria-hidden="true"><span></span><span></span><span></span></div>
+        <img class="gengar-header-art" src="sprites/94.png" alt="" aria-hidden="true">
+        <div class="kicker">POKÉMON TCG BRASIL</div>
+        <div class="header-row">
+          <div>
+            <h1>Fichário digital</h1>
+            <p id="header-status">Coleção local protegida</p>
+          </div>
+          <button class="header-icon" onclick="openBackupPanel()" aria-label="Backup">⋮</button>
         </div>
-        <button class="header-icon" onclick="openBackupPanel()" aria-label="Backup">⋮</button>
-      </div>
-    </header>
-
-    <nav id="tabs" class="tabs" aria-label="Navegação principal"></nav>
+      </header>
+      <nav id="tabs" class="tabs" aria-label="Navegação principal"></nav>
+    </div>
     <main id="content" class="content" aria-live="polite"></main>
   </div>
 

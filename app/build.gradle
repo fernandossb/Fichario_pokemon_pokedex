@@ -10,8 +10,8 @@ android {
         applicationId 'br.com.fichariopokemon.pokedex'
         minSdk 26
         targetSdk 35
-        versionCode 28
-        versionName '0.27.0-cardmarket-trend-catalogo-completo'
+        versionCode 36
+        versionName '1.3.3-gengar-safe-area-contraste'
     }
 
     signingConfigs {
