@@ -16,11 +16,12 @@ const PRICE_CACHE_KEY = 'fichario-pokemon-price-cache-v1';
 const FX_CACHE_KEY = 'fichario-pokemon-fx-cache-v1';
 const LIGA_SET_CACHE_KEY = 'fichario-pokemon-liga-set-cache-v1';
 const PRICE_LOGIC_VERSION_KEY = 'fichario-pokemon-price-logic-version';
-const PRICE_LOGIC_VERSION = 10;
+const PRICE_LOGIC_VERSION = 11;
 const PRICE_CACHE_TTL = 24 * 60 * 60 * 1000;
 const FX_CACHE_TTL = 24 * 60 * 60 * 1000;
 const TCGDEX_API_BASE = 'https://api.tcgdex.net/v2/pt-br';
 const TCGDEX_API_FALLBACK = 'https://api.tcgdex.net/v2/en';
+const TCGDEX_API_JAPANESE = 'https://api.tcgdex.net/v2/ja';
 const FX_API_BASE = 'https://api.frankfurter.dev/v2';
 const LIGA_POKEMON_BASES = ['https://www.ligapokemon.com.br/', 'https://ligapokemon.com.br/'];
 const TAB_ITEMS = [
@@ -558,15 +559,17 @@ function cardmarketValidation(card, remote, kind) {
 
 function cardmarketMetric(cardmarket, kind) {
   const holo = kind === 'holo' || kind === 'reverse';
-  const field = holo ? 'avg1-holo' : 'avg1';
-  const label = holo ? 'média diária foil (24h)' : 'média diária (24h)';
+  // Trend Price é a referência de tendência exibida pelo Cardmarket.
+  // Para acabamentos foil/reverse, usamos o campo específico de foil.
+  const field = holo ? 'trend-holo' : 'trend';
+  const label = holo ? 'tendência foil' : 'tendência';
   if (hasFiniteNumber(cardmarket?.[field]) && Number(cardmarket[field]) >= 0) {
     return { field, label, value: Number(cardmarket[field]) };
   }
   return null;
 }
 
-function cardmarketAverageQuote(cardmarket, kind, card, remoteIdentity) {
+function cardmarketTrendQuote(cardmarket, kind, card, remoteIdentity) {
   if (!cardmarket || typeof cardmarket !== 'object' || !card || !remoteIdentity) return null;
   const metric = cardmarketMetric(cardmarket, kind);
   if (!metric) return null;
@@ -592,14 +595,14 @@ function cardmarketAverageQuote(cardmarket, kind, card, remoteIdentity) {
 }
 
 
-async function fetchCardmarketDailyPricing(cardId, finish = 'comum') {
+async function fetchCardmarketTrendPricing(cardId, finish = 'comum') {
   const card = cardMap.get(cardId);
   if (!card) throw new Error('Carta não encontrada no catálogo local.');
   const pricing = await fetchTcgDexPricing(cardId);
   const kind = finishKind(finish);
-  const quote = cardmarketAverageQuote(pricing.cardmarket, kind, card, pricing.identity);
+  const quote = cardmarketTrendQuote(pricing.cardmarket, kind, card, pricing.identity);
   if (!quote) {
-    throw new Error(`Cardmarket sem média diária de 24 horas para o acabamento ${kind}.`);
+    throw new Error(`Cardmarket sem preço de tendência para o acabamento ${kind}.`);
   }
   const converted = quoteInBrl(quote, pricing.fetchedAt);
   if (!converted) throw new Error('Cotação EUR/BRL indisponível.');
@@ -625,10 +628,10 @@ function automaticPriceQuote(cardId, finish = 'comum') {
   if (!quote || !card || !hasFiniteNumber(quote.brl)) return null;
   return {
     ...quote,
-    label: quote.label || 'Cardmarket · média diária (24h)',
+    label: quote.label || 'Cardmarket · tendência',
     source: 'cardmarket',
     provider: 'Cardmarket via TCGdex',
-    fingerprint: quote.fingerprint || [card.id, card.setId, card.localId, kind, quote.brl, 'cardmarket-avg1'].join('|'),
+    fingerprint: quote.fingerprint || [card.id, card.setId, card.localId, kind, quote.brl, 'cardmarket-trend'].join('|'),
   };
 }
 
@@ -645,7 +648,7 @@ function storedAutomaticPriceQuote(variant) {
     && variant.automaticPriceFingerprint === variant.automaticPriceAcceptedFingerprint;
   return {
     brl: Number(variant.automaticEstimatedValue),
-    label: variant.automaticPriceLabel || 'Cardmarket · média diária (24h)',
+    label: variant.automaticPriceLabel || 'Cardmarket · tendência',
     source: variant.automaticPriceSource || 'cardmarket',
     provider: variant.automaticPriceProvider || 'Cardmarket via TCGdex',
     value: nullableNumber(variant.automaticPriceOriginalValue),
@@ -688,7 +691,7 @@ function applyAutomaticPriceToVariant(cardId, variant) {
     || JSON.stringify(variant.automaticPriceValidationChecks || []) !== JSON.stringify(nextChecks);
   variant.automaticEstimatedValue = nextValue;
   variant.automaticPriceSource = quote.source || 'cardmarket';
-  variant.automaticPriceLabel = quote.label || 'Cardmarket · média diária (24h)';
+  variant.automaticPriceLabel = quote.label || 'Cardmarket · tendência';
   variant.automaticPriceProvider = quote.provider || 'Cardmarket via TCGdex';
   variant.automaticPriceOriginalValue = nullableNumber(quote.value);
   variant.automaticPriceCurrency = quote.currency || 'BRL';
@@ -768,7 +771,7 @@ async function fetchCardPricing(cardId, force = false, finish = 'comum') {
     const card = cardMap.get(cardId);
     if (!card) throw new Error('Carta não encontrada no catálogo local.');
     await ensureFxRates(['EUR'], force);
-    const cardmarket = await fetchCardmarketDailyPricing(cardId, finish);
+    const cardmarket = await fetchCardmarketTrendPricing(cardId, finish);
     cardmarket.kind = kind;
     cardmarket.fetchedAt = Date.now();
     const previous = priceCache[cardId] || {};
@@ -891,6 +894,7 @@ function rebuildCatalogIndexes() {
     .filter(item => item.normalized)
     .sort((a, b) => b.normalized.length - a.normalized.length);
   for (const card of cards) {
+    card.imageUrl = upgradeCardImageUrl(card.imageUrl);
     if (!Array.isArray(card.pokemonIds) || !card.pokemonIds.length) card.pokemonIds = inferPokemonIds(card.name);
   }
   cardMap = new Map(cards.map(card => [card.id, card]));
@@ -1325,12 +1329,12 @@ function pricingPanel() {
   return `<section class="price-update-card">
     <div class="catalog-update-heading">
       <div><strong>Preços Cardmarket</strong><span>${counts.priced} de ${counts.owned} cartas próprias com valor aceito${counts.pending ? ` · ${counts.pending} aguardando validação` : ''}${latest ? ` · última consulta ${esc(formatPriceDate(latest))}` : ''}</span></div>
-      <span class="online-badge">Cardmarket AVG1</span>
+      <span class="online-badge">Cardmarket Trend</span>
     </div>
-    <p>Prioridade: valor manual → média diária Cardmarket das últimas 24 horas. A identificação valida Pokémon, número, coleção, ilustrador, acabamento e status promocional.</p>
+    <p>Prioridade: valor manual → Trend Price do Cardmarket. A identificação valida Pokémon, número, coleção, ilustrador, acabamento e status promocional.</p>
     ${priceUpdating ? `<div class="catalog-progress"><div class="progress"><span style="width:${progress}%"></span></div><small>${esc(priceUpdateMessage || 'Consultando preços...')}</small></div>` : ''}
     <button class="primary-btn" ${priceUpdating ? 'disabled' : ''} onclick="startOwnedPriceUpdate()">${priceUpdating ? 'Atualizando...' : 'Atualizar preços da coleção'}</button>
-    ${priceUpdateFailures ? `<div class="catalog-last-result">${priceUpdateFailures} carta(s) não possuem média diária AVG1 no Cardmarket nesta tentativa.</div>` : ''}
+    ${priceUpdateFailures ? `<div class="catalog-last-result">${priceUpdateFailures} carta(s) não possuem Trend Price no Cardmarket nesta tentativa.</div>` : ''}
   </section>`;
 }
 
@@ -1357,7 +1361,7 @@ async function startOwnedPriceUpdate() {
   if (!targets.length) return notify('Nenhuma carta cadastrada para atualizar.');
   priceUpdating = true;
   priceUpdateFailures = 0;
-  setPriceUpdateProgress('Atualizando médias diárias do Cardmarket...', 0, targets.length);
+  setPriceUpdateProgress('Atualizando tendências do Cardmarket...', 0, targets.length);
   try { await ensureFxRates(['EUR'], false); } catch (_) {}
 
   const pendingTargets = targets.filter(item => !priceCacheFresh(item.cardId, item.finish));
@@ -1368,7 +1372,7 @@ async function startOwnedPriceUpdate() {
     priceUpdating = false;
     priceUpdateMessage = '';
     renderKeepingScroll();
-    notify('As médias diárias do Cardmarket já estão atualizadas.');
+    notify('As tendências do Cardmarket já estão atualizadas.');
     return;
   }
 
@@ -1400,7 +1404,7 @@ async function startOwnedPriceUpdate() {
   priceUpdating = false;
   priceUpdateMessage = '';
   renderKeepingScroll();
-  notify(`Cardmarket: ${pendingTargets.length - priceUpdateFailures} média(s) diária(s) encontrada(s) · ${priceUpdateFailures} sem AVG1.`);
+  notify(`Cardmarket: ${pendingTargets.length - priceUpdateFailures} tendência(s) encontrada(s) · ${priceUpdateFailures} sem tendência.`);
 }
 
 function renderDashboard() {
@@ -1473,7 +1477,7 @@ function catalogUpdatePanel() {
   return `<section class="catalog-update-card">
     <div class="catalog-update-heading">
       <div><strong>Atualização das coleções</strong><span>${esc(lastResult)}</span></div>
-      <span class="online-badge">TCGdex PT-BR + EN</span>
+      <span class="online-badge">TCGdex completo JA + EN + PT-BR</span>
     </div>
     <p>Verifica novas expansões e cartas sem apagar quantidades, variantes, observações ou outros dados da sua coleção.</p>
     ${catalogUpdating ? `<div class="catalog-progress"><div class="progress"><span style="width:${progress}%"></span></div><small>${esc(catalogUpdateMessage || 'Preparando atualização...')}</small></div>` : ''}
@@ -1526,8 +1530,21 @@ function setNeedsCatalogRefresh(local, remote) {
 function cardImageUrl(value) {
   const source = String(value || '').trim();
   if (!source) return null;
+  if (/assets\.tcgdex\.net/i.test(source)) {
+    const root = source.replace(/\/(?:low|high)\.(?:webp|png|jpe?g)(\?.*)?$/i, '').replace(/\/$/, '');
+    return `${root}/high.webp`;
+  }
   if (/\.(webp|png|jpe?g)(\?.*)?$/i.test(source)) return source;
-  return `${source.replace(/\/$/, '')}/low.webp`;
+  return `${source.replace(/\/$/, '')}/high.webp`;
+}
+
+function upgradeCardImageUrl(value) {
+  const source = String(value || '').trim();
+  if (!source) return null;
+  if (!/assets\.tcgdex\.net/i.test(source)) return source;
+  return source
+    .replace(/\/low\.webp(\?.*)?$/i, '/high.webp$1')
+    .replace(/\/low\.png(\?.*)?$/i, '/high.png$1');
 }
 
 function normalizeRemoteSet(detail, fallback) {
@@ -1568,36 +1585,65 @@ function normalizeRemoteCard(remote, set) {
   };
 }
 
+function inferSetIdFromRemoteCard(remote) {
+  const explicit = String(remote?.set?.id || remote?.setId || '').trim();
+  if (explicit) return explicit;
+  const id = String(remote?.id || '').trim();
+  const localId = String(remote?.localId || '').trim();
+  if (id && localId && id.endsWith(`-${localId}`)) return id.slice(0, -(localId.length + 1));
+  const split = id.lastIndexOf('-');
+  return split > 0 ? id.slice(0, split) : '';
+}
+
 async function fetchCatalogLocale(base, localeLabel) {
-  const remoteSets = await fetchJsonWithTimeout(`${base}/sets`, 45000);
+  // A listagem direta /cards evita perder cartas quando uma consulta individual
+  // de coleção falha. É também muito mais rápida do que abrir todos os sets.
+  const [remoteSets, remoteCards] = await Promise.all([
+    fetchJsonWithTimeout(`${base}/sets`, 60000),
+    fetchJsonWithTimeout(`${base}/cards`, 90000),
+  ]);
   if (!Array.isArray(remoteSets)) throw new Error(`${localeLabel}: lista de coleções inválida.`);
+  if (!Array.isArray(remoteCards)) throw new Error(`${localeLabel}: lista de cartas inválida.`);
+
   const sets = new Map();
-  const cards = new Map();
-  let failures = 0;
-  for (let index = 0; index < remoteSets.length; index++) {
-    const remote = remoteSets[index];
+  for (const remote of remoteSets) {
     if (!remote?.id) continue;
-    setCatalogUpdateProgress(`${localeLabel}: ${remote.name || remote.id}...`, index, remoteSets.length);
-    try {
-      const detail = await fetchJsonWithTimeout(`${base}/sets/${encodeURIComponent(remote.id)}`, 35000);
-      const set = normalizeRemoteSet(detail, remote);
-      if (!set.id) continue;
-      sets.set(set.id, set);
-      for (const remoteCard of Array.isArray(detail?.cards) ? detail.cards : []) {
-        const normalized = normalizeRemoteCard(remoteCard, set);
-        if (normalized.id) cards.set(normalized.id, normalized);
-      }
-    } catch (_) {
-      failures++;
-    }
+    const set = normalizeRemoteSet(remote, remote);
+    if (set.id) sets.set(set.id, set);
   }
-  return { sets, cards, failures };
+
+  const cards = new Map();
+  for (let index = 0; index < remoteCards.length; index++) {
+    const remote = remoteCards[index];
+    if (!remote?.id) continue;
+    if (index % 500 === 0) {
+      setCatalogUpdateProgress(`${localeLabel}: importando ${index.toLocaleString('pt-BR')} de ${remoteCards.length.toLocaleString('pt-BR')} cartas...`, index, remoteCards.length);
+    }
+    const setId = inferSetIdFromRemoteCard(remote);
+    let set = sets.get(setId);
+    if (!set) {
+      const brief = remote?.set || {};
+      set = {
+        id: setId || String(brief.id || 'sem-colecao'),
+        name: String(brief.name || setId || 'Coleção não identificada'),
+        officialCardCount: Number(brief?.cardCount?.official) || 0,
+        totalCardCount: Number(brief?.cardCount?.total) || 0,
+        logoUrl: brief.logo || null,
+        symbolUrl: brief.symbol || null,
+      };
+      sets.set(set.id, set);
+    }
+    const normalized = normalizeRemoteCard(remote, set);
+    if (normalized.id) cards.set(normalized.id, normalized);
+  }
+  setCatalogUpdateProgress(`${localeLabel}: ${cards.size.toLocaleString('pt-BR')} cartas encontradas.`, remoteCards.length, remoteCards.length, true);
+  return { sets, cards, failures: 0, listedCards: remoteCards.length };
 }
 
 async function startCatalogUpdate() {
   if (catalogUpdating) return;
   catalogUpdating = true;
-  setCatalogUpdateProgress('Conectando aos catálogos TCGdex PT-BR e EN...', 0, 1, true);
+  setCatalogUpdateProgress('Baixando o catálogo completo TCGdex EN, PT-BR e japonês...', 0, 1, true);
 
   try {
     const localSets = new Map((catalog.sets || []).map(item => [item.id, { ...item }]));
@@ -1607,11 +1653,16 @@ async function startCatalogUpdate() {
 
     let ptResult = { sets: new Map(), cards: new Map(), failures: 0 };
     let enResult = { sets: new Map(), cards: new Map(), failures: 0 };
-    try { ptResult = await fetchCatalogLocale(TCGDEX_API_BASE, 'Português'); } catch (_) {}
+    let jaResult = { sets: new Map(), cards: new Map(), failures: 0 };
+    try { jaResult = await fetchCatalogLocale(TCGDEX_API_JAPANESE, 'Japonês'); } catch (_) {}
     try { enResult = await fetchCatalogLocale(TCGDEX_API_FALLBACK, 'Inglês'); } catch (_) {}
-    if (!ptResult.cards.size && !enResult.cards.size) throw new Error('Nenhum dos catálogos online respondeu.');
+    try { ptResult = await fetchCatalogLocale(TCGDEX_API_BASE, 'Português'); } catch (_) {}
+    if (!ptResult.cards.size && !enResult.cards.size && !jaResult.cards.size) throw new Error('Nenhum dos catálogos online respondeu.');
 
-    // Inglês amplia a cobertura; português sobrescreve nomes e imagens quando disponível.
+    // Japonês inclui impressões regionais; inglês amplia a cobertura internacional;
+    // português sobrescreve nomes e imagens quando disponível.
+    for (const [id, set] of jaResult.sets) localSets.set(id, { ...(localSets.get(id) || {}), ...set });
+    for (const [id, card] of jaResult.cards) localCards.set(id, { ...(localCards.get(id) || {}), ...card, catalogLocale: 'ja' });
     for (const [id, set] of enResult.sets) localSets.set(id, { ...(localSets.get(id) || {}), ...set });
     for (const [id, card] of enResult.cards) localCards.set(id, { ...(localCards.get(id) || {}), ...card, catalogLocale: 'en' });
     for (const [id, set] of ptResult.sets) localSets.set(id, { ...(localSets.get(id) || {}), ...set });
@@ -1630,7 +1681,7 @@ async function startCatalogUpdate() {
 
     const updatedCatalog = {
       version: new Date().toISOString(),
-      source: 'TCGdex PT-BR + EN + catálogo local',
+      source: 'TCGdex completo JA + EN + PT-BR + catálogo local',
       sets: [...localSets.values()],
       cards: [...localCards.values()],
     };
@@ -1646,14 +1697,17 @@ async function startCatalogUpdate() {
       cardsAdded: Math.max(0, localCards.size - oldCardCount),
       setsTotal: localSets.size,
       cardsTotal: localCards.size,
-      failures: ptResult.failures + enResult.failures,
+      failures: ptResult.failures + enResult.failures + jaResult.failures,
+      enListedCards: enResult.listedCards || enResult.cards.size,
+      ptListedCards: ptResult.listedCards || ptResult.cards.size,
+      jaListedCards: jaResult.listedCards || jaResult.cards.size,
     };
     saveCatalogUpdateMeta(result);
     ui.cardLimit = 80;
     catalogUpdating = false;
     catalogUpdateMessage = '';
     render();
-    notify(`Catálogo ampliado: ${result.cardsTotal.toLocaleString('pt-BR')} cartas (+${result.cardsAdded.toLocaleString('pt-BR')}).`);
+    notify(`Catálogo completo: ${result.cardsTotal.toLocaleString('pt-BR')} impressões únicas (+${result.cardsAdded.toLocaleString('pt-BR')}).`);
   } catch (error) {
     catalogUpdating = false;
     catalogUpdateMessage = '';
@@ -1883,10 +1937,10 @@ function automaticPriceBox(cardId, finish = 'comum', variantId = '') {
       <button type="button" class="price-refresh-btn" ${loading ? 'disabled' : ''} onclick="event.preventDefault();event.stopPropagation();updateCardPrice('${esc(cardId)}', document.getElementById('regFinish')?.value || '${esc(finish)}', true)">${loading ? 'Consultando...' : 'Atualizar agora'}</button>
     </div>`;
   }
-  if (loading) return `<div class="automatic-price-card loading-price"><strong>Consultando média diária do Cardmarket...</strong><span>Aguarde alguns segundos.</span></div>`;
+  if (loading) return `<div class="automatic-price-card loading-price"><strong>Consultando tendência do Cardmarket...</strong><span>Aguarde alguns segundos.</span></div>`;
   return `<div class="automatic-price-card empty-price">
-    <strong>Sem média diária no Cardmarket</strong>
-    <span>Ordem: valor manual → Cardmarket AVG1 (24h).</span>
+    <strong>Sem tendência no Cardmarket</strong>
+    <span>Ordem: valor manual → Cardmarket Trend Price.</span>
     <button type="button" class="price-refresh-btn" onclick="event.preventDefault();event.stopPropagation();updateCardPrice('${esc(cardId)}', document.getElementById('regFinish')?.value || '${esc(finish)}', true)">Consultar preço</button>
   </div>`;
 }
@@ -1922,9 +1976,9 @@ async function updateCardPrice(cardId, finish = 'comum', force = false) {
     const quote = automaticPriceQuote(cardId, finish);
     notify(quote
       ? (quote.confidence === 'verified'
-        ? (saved ? 'Média diária do Cardmarket salva' : 'Média diária do Cardmarket encontrada')
+        ? (saved ? 'Tendência do Cardmarket salva' : 'Tendência do Cardmarket encontrada')
         : 'Preço Cardmarket encontrado para revisão')
-      : 'O Cardmarket não retornou média diária para esta carta.');
+      : 'O Cardmarket não retornou tendência para esta carta.');
   } catch (error) {
     refreshAutomaticPriceField(cardId, finish);
     const message = error?.name === 'AbortError' ? 'A consulta demorou demais.' : String(error?.message || 'Não foi possível consultar o preço agora.');
@@ -1958,7 +2012,7 @@ function openCard(cardId, variantId = undefined) {
     <button class="modal-close" onclick="closeModal()" aria-label="Fechar">×</button>
     <div class="registration-header">
       <div class="registration-image-frame" data-fichario-card-image="${esc(card.id)}">
-        ${card.imageUrl ? `<img class="registration-card-image" src="${esc(card.imageUrl)}" alt="Arte de ${esc(card.name)}">` : '<div class="registration-placeholder">TCG</div>'}
+        ${card.imageUrl ? `<img class="registration-card-image" src="${esc(upgradeCardImageUrl(card.imageUrl))}" alt="Arte de ${esc(card.name)}">` : '<div class="registration-placeholder">TCG</div>'}
       </div>
       <div>
         <span class="registration-kicker">CADASTRO DA CARTA</span>

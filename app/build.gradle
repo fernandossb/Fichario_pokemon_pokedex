@@ -10,8 +10,8 @@ android {
         applicationId 'br.com.fichariopokemon.pokedex'
         minSdk 26
         targetSdk 35
-        versionCode 27
-        versionName '0.26.0-cardmarket-catalogo-ampliado'
+        versionCode 28
+        versionName '0.27.0-cardmarket-trend-catalogo-completo'
     }
 
     signingConfigs {

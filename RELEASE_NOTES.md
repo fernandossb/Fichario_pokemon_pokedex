@@ -1,10 +1,8 @@
-# Versão 0.26 — Cardmarket e catálogo ampliado
+# Versão 0.27 — Cardmarket Trend, imagens HD e catálogo completo
 
-- Preço automático exclusivamente pelo Cardmarket.
-- Usa a média diária de vendas das últimas 24 horas (`AVG1`).
-- Para cartas foil, usa `Foil AVG1`.
-- Validação por número do Pokémon, número da carta, coleção, ilustrador, acabamento e status promocional.
-- Catálogo online ampliado combinando TCGdex PT-BR e inglês.
-- Cartas disponíveis apenas no catálogo inglês também passam a aparecer.
-- O total real é mostrado depois da atualização online; não é fixado artificialmente em 17.000.
-- Mantém o último preço salvo quando não existe média diária.
+- Preço automático alterado para o **Trend Price** do Cardmarket.
+- Acabamentos holo/reverse usam **Foil Trend** quando disponível.
+- Imagens do cadastro passam a solicitar `high.webp` e aparecem maiores.
+- Atualização do catálogo passa a usar diretamente o endpoint completo `/cards` da TCGdex em inglês e português.
+- Evita perda de cartas causada por falhas ao abrir coleção por coleção.
+- O total exibido representa impressões únicas realmente retornadas pela fonte, sem número artificial.
