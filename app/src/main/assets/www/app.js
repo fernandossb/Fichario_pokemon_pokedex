@@ -584,6 +584,73 @@ function cardmarketAverageQuote(cardmarket, kind, card, remoteIdentity) {
   };
 }
 
+
+const nativeMypRequests = new Map();
+
+window.receiveMypCardsPrice = function(requestId, ok, payload, error) {
+  const id = String(requestId || '');
+  const pending = nativeMypRequests.get(id);
+  if (!pending) return;
+  clearTimeout(pending.timeout);
+  nativeMypRequests.delete(id);
+  if (ok) {
+    try {
+      pending.resolve(typeof payload === 'string' ? JSON.parse(payload) : payload);
+    } catch (parseError) {
+      pending.reject(new Error('O MYP Cards respondeu em formato inesperado.'));
+    }
+  } else {
+    pending.reject(new Error(error || 'O MYP Cards não retornou preço.'));
+  }
+};
+
+function fetchMypCardsThroughAndroid(card, timeoutMs = 45000) {
+  if (!window.Android || typeof window.Android.requestMypCards !== 'function') {
+    return Promise.reject(new Error('Consulta nativa ao MYP Cards indisponível nesta versão.'));
+  }
+  return new Promise((resolve, reject) => {
+    const requestId = `myp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const timeout = setTimeout(() => {
+      nativeMypRequests.delete(requestId);
+      reject(new Error('A consulta ao MYP Cards expirou.'));
+    }, timeoutMs);
+    nativeMypRequests.set(requestId, { resolve, reject, timeout });
+    try {
+      window.Android.requestMypCards(
+        requestId,
+        String(card?.name || ''),
+        String(card?.number || card?.localId || ''),
+        String(card?.setName || ''),
+        String(card?.setId || '')
+      );
+    } catch (error) {
+      clearTimeout(timeout);
+      nativeMypRequests.delete(requestId);
+      reject(error);
+    }
+  });
+}
+
+async function fetchMypCardsPricing(cardId) {
+  const card = cardMap.get(cardId);
+  if (!card) throw new Error('Carta não encontrada no catálogo local.');
+  const data = await fetchMypCardsThroughAndroid(card);
+  if (!hasFiniteNumber(data?.brl)) throw new Error(data?.diagnostic || 'O MYP Cards não encontrou esta impressão.');
+  return {
+    brl: Number(data.brl),
+    value: Number(data.brl),
+    currency: 'BRL',
+    source: 'mypcards',
+    provider: 'MYP Cards',
+    label: data.metric === 'lowest' ? 'MYP Cards · menor oferta' : 'MYP Cards · mediana',
+    metric: data.metric || 'median',
+    url: data.url || '',
+    matchedCode: data.matchedCode || '',
+    diagnostic: data.diagnostic || '',
+    fetchedAt: Date.now(),
+  };
+}
+
 function fxRate(currency) {
   if (currency === 'BRL') return 1;
   const item = fxCache[currency];
@@ -593,47 +660,34 @@ function fxRate(currency) {
 function automaticPriceQuote(cardId, finish = 'comum') {
   const cached = priceCache[cardId];
   const card = cardMap.get(cardId);
-  if (!cached || !card) return null;
+  const quote = cached?.mypcards;
+  if (!quote || !card || !hasFiniteNumber(quote.brl)) return null;
   const kind = finishKind(finish);
-
-  const ligaQuote = ligaPokemonAverageQuote(cached.ligaPokemon, kind);
-  if (ligaQuote) {
-    return {
-      ...ligaQuote,
-      brl: ligaQuote.value,
-      rate: 1,
-      fetchedAt: cached.fetchedAt || null,
-      confidence: 'verified', verified: true, usable: true,
-      fingerprint: [card.id, card.setId, card.localId, kind, ligaQuote.value, 'liga'].join('|'),
-      validation: { reasons: [], checks: [
+  const brl = Math.round(Number(quote.brl) * 100) / 100;
+  return {
+    brl,
+    value: brl,
+    currency: 'BRL',
+    rate: 1,
+    label: quote.label || 'MYP Cards · mediana',
+    source: 'mypcards',
+    provider: 'MYP Cards',
+    fetchedAt: cached.fetchedAt || quote.fetchedAt || null,
+    confidence: 'verified',
+    verified: true,
+    usable: true,
+    url: quote.url || '',
+    fingerprint: [card.id, card.setId, card.localId, kind, brl, 'mypcards'].join('|'),
+    validation: {
+      reasons: [],
+      checks: [
         { key: 'local-id', label: 'identificação pelo catálogo local', ok: true },
-        { key: 'set', label: 'coleção exata', ok: true },
-        { key: 'number', label: 'número de colecionador exato', ok: true },
-      ] },
-    };
-  }
-
-  const remote = cached.tcgDexIdentity;
-  const cm = quoteInBrl(cardmarketAverageQuote(cached.cardmarket, kind, card, remote), cached.fetchedAt);
-  const tp = quoteInBrl(tcgplayerAverageQuote(cached.tcgplayer, kind, card, remote), cached.fetchedAt);
-  const verified = [cm, tp].filter(item => item?.verified && hasFiniteNumber(item.brl));
-  if (verified.length >= 2) {
-    const brl = Math.round((verified.reduce((sum, item) => sum + Number(item.brl), 0) / verified.length) * 100) / 100;
-    return {
-      brl,
-      value: brl,
-      currency: 'BRL',
-      rate: 1,
-      label: `Média internacional · ${verified.map(item => item.source === 'cardmarket' ? 'Cardmarket' : 'TCGplayer').join(' + ')}`,
-      source: 'multifonte',
-      provider: 'TCGdex · múltiplos mercados',
-      fetchedAt: cached.fetchedAt || null,
-      confidence: 'verified', verified: true, usable: true,
-      fingerprint: [card.id, kind, ...verified.map(item => item.fingerprint)].join('|'),
-      validation: { reasons: [], checks: verified.flatMap(item => item.validation?.checks || []) },
-    };
-  }
-  return verified[0] || cm || tp || null;
+        { key: 'set', label: 'coleção comparada no MYP Cards', ok: true },
+        { key: 'number', label: 'número de colecionador comparado no MYP Cards', ok: true },
+        { key: 'source', label: 'preço exclusivamente do MYP Cards', ok: true },
+      ],
+    },
+  };
 }
 
 function legacyPriceQuote(cardId) {
@@ -649,9 +703,9 @@ function storedAutomaticPriceQuote(variant) {
     && variant.automaticPriceFingerprint === variant.automaticPriceAcceptedFingerprint;
   return {
     brl: Number(variant.automaticEstimatedValue),
-    label: variant.automaticPriceLabel || 'Liga Pokémon',
-    source: variant.automaticPriceSource || 'ligapokemon',
-    provider: variant.automaticPriceProvider || 'Marketplace Liga Pokémon',
+    label: variant.automaticPriceLabel || 'MYP Cards',
+    source: variant.automaticPriceSource || 'mypcards',
+    provider: variant.automaticPriceProvider || 'MYP Cards',
     value: nullableNumber(variant.automaticPriceOriginalValue),
     currency: variant.automaticPriceCurrency || 'BRL',
     fetchedAt: variant.automaticPriceUpdatedAt || null,
@@ -691,9 +745,9 @@ function applyAutomaticPriceToVariant(cardId, variant) {
     || JSON.stringify(variant.automaticPriceValidationReasons || []) !== JSON.stringify(nextReasons)
     || JSON.stringify(variant.automaticPriceValidationChecks || []) !== JSON.stringify(nextChecks);
   variant.automaticEstimatedValue = nextValue;
-  variant.automaticPriceSource = quote.source || 'ligapokemon';
-  variant.automaticPriceLabel = quote.label || 'Liga Pokémon';
-  variant.automaticPriceProvider = quote.provider || 'Marketplace Liga Pokémon';
+  variant.automaticPriceSource = quote.source || 'mypcards';
+  variant.automaticPriceLabel = quote.label || 'MYP Cards';
+  variant.automaticPriceProvider = quote.provider || 'MYP Cards';
   variant.automaticPriceOriginalValue = nullableNumber(quote.value);
   variant.automaticPriceCurrency = quote.currency || 'BRL';
   variant.automaticPriceUpdatedAt = nextUpdated;
@@ -769,25 +823,12 @@ async function fetchCardPricing(cardId, force = false) {
   const request = (async () => {
     const card = cardMap.get(cardId);
     if (!card) throw new Error('Carta não encontrada no catálogo local.');
-    try { await loadFxRates(false); } catch (_) {}
-    const [tcgResult, ligaResult] = await Promise.allSettled([
-      fetchTcgDexPricing(cardId),
-      fetchLigaPokemonPricing(cardId),
-    ]);
-    const tcg = tcgResult.status === 'fulfilled' ? tcgResult.value : null;
-    const ligaPokemon = ligaResult.status === 'fulfilled' ? ligaResult.value : null;
-    const errors = [];
-    if (tcgResult.status === 'rejected') errors.push(String(tcgResult.reason?.message || tcgResult.reason));
-    if (ligaResult.status === 'rejected') errors.push(String(ligaResult.reason?.message || ligaResult.reason));
-    if (!ligaPokemon && !tcg?.cardmarket && !tcg?.tcgplayer) throw new Error(errors.join(' | ') || 'Nenhuma fonte retornou preço.');
+    const mypcards = await fetchMypCardsPricing(cardId);
     priceCache[cardId] = {
       logicVersion: PRICE_LOGIC_VERSION,
       fetchedAt: Date.now(),
-      ligaPokemon,
-      cardmarket: tcg?.cardmarket || null,
-      tcgplayer: tcg?.tcgplayer || null,
-      tcgDexIdentity: tcg?.identity || null,
-      diagnostics: errors,
+      mypcards,
+      diagnostics: mypcards.diagnostic ? [mypcards.diagnostic] : [],
       identity: { id: card.id, setId: card.setId, localId: card.localId, name: card.name },
     };
     savePriceCache();
@@ -1962,7 +2003,9 @@ function openCard(cardId, variantId = undefined) {
   showModal(`
     <button class="modal-close" onclick="closeModal()" aria-label="Fechar">×</button>
     <div class="registration-header">
-      ${card.imageUrl ? `<img class="registration-card-image" src="${esc(card.imageUrl)}" onerror="this.outerHTML='<div class=&quot;registration-placeholder&quot;>TCG</div>'">` : '<div class="registration-placeholder">TCG</div>'}
+      <div class="registration-image-frame" data-fichario-card-image="${esc(card.id)}">
+        ${card.imageUrl ? `<img class="registration-card-image" src="${esc(card.imageUrl)}" alt="Arte de ${esc(card.name)}">` : '<div class="registration-placeholder">TCG</div>'}
+      </div>
       <div>
         <span class="registration-kicker">CADASTRO DA CARTA</span>
         <h2>${esc(card.name)}</h2>
@@ -1987,7 +2030,7 @@ function openCard(cardId, variantId = undefined) {
       <h3>${existingId ? 'Editar variante' : 'Nova variante'}</h3>
       <input type="hidden" id="regVariantId" value="${esc(existingId)}">
       <div class="registration-grid two-columns">
-        ${registrationField('Quantidade', `<input id="regQuantity" class="field" type="number" inputmode="numeric" min="0" step="1" value="${Math.max(0, Number(draft.quantity) || 0)}">`)}
+        ${registrationField('Quantidade', `<div class="quantity-stepper"><button type="button" class="quantity-step-btn" onclick="changeRegistrationQuantity(-1)" aria-label="Diminuir quantidade">−</button><input id="regQuantity" class="field quantity-step-value" type="number" inputmode="numeric" min="0" step="1" value="${Math.max(0, Number(draft.quantity) || 0)}"><button type="button" class="quantity-step-btn" onclick="changeRegistrationQuantity(1)" aria-label="Aumentar quantidade">+</button></div>`)}
         ${registrationField('Condição', `<select id="regCondition" class="field">${['Mint','Near Mint','Excelente','Bom','Regular','Danificada'].map(value => option(value,value,draft.condition)).join('')}</select>`)}
         ${registrationField('Acabamento', `<select id="regFinish" class="field" onchange="refreshAutomaticPriceField('${esc(card.id)}', this.value)">${['comum','holografica','reversa','especial','full art','secreta','jumbo','outro'].map(value => option(value,value,draft.finish)).join('')}</select>`)}
         ${registrationField('Idioma', `<select id="regLanguage" class="field">${['Portugues BR','Ingles','Japones','Espanhol','Outro'].map(value => option(value,value,draft.language)).join('')}</select>`)}
@@ -2014,6 +2057,14 @@ function openCard(cardId, variantId = undefined) {
       </div>
     </section>`);
   ensureCardPriceLoaded(card.id, draft.finish);
+}
+
+function changeRegistrationQuantity(delta) {
+  const input = document.getElementById('regQuantity');
+  if (!input) return;
+  const current = Math.max(0, Number.parseInt(input.value || '0', 10) || 0);
+  input.value = String(Math.max(0, current + Number(delta || 0)));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 function registrationField(label, control) {

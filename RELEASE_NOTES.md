@@ -1,8 +1,8 @@
-# Versão 0.23.0 — Imagens locais
+# Versão 0.25 — MYP Cards e melhorias no cadastro
 
-- Adicione uma imagem da carta pela câmera ou pela galeria.
-- Troque ou remova a imagem local quando quiser.
-- A foto é recortada e comprimida automaticamente.
-- A imagem fica associada ao ID exato da carta.
-- Imagens locais agora são incluídas no backup e restauradas em outro aparelho.
-- Mantidos preços multifonte, Pokédex, decks, assinatura e atualização automática.
+- Preços automáticos exclusivamente pelo MYP Cards.
+- Prioridade para a Mediana MYP; fallback para a menor oferta pública disponível.
+- Foto da carta ampliada no cadastro para proporção próxima de uma carta física.
+- Quantidade controlada por botões de menos e mais ao lado do número.
+- Correção dos textos Fichário, Pokémon, catálogo, coleção, Pokédex e do botão ⋮.
+- Mantidos backup, imagens locais, assinatura definitiva e atualização automática.

@@ -1,19 +1,16 @@
-PATCH v0.22 — ARTES DE ENERGIAS
+PATCH v0.25 — MYP CARDS + MELHORIAS NO CADASTRO
 
 1. Extraia este ZIP.
-2. Copie a pasta "app" e o arquivo "RELEASE_NOTES.md".
-3. Cole na pasta principal do seu repositório.
-4. Confirme "Substituir os arquivos no destino".
-5. No GitHub Desktop, confirme que aparecem somente:
-   - app/build.gradle
-   - app/src/main/assets/www/image-fallback.js
-   - RELEASE_NOTES.md
-6. Commit: Versão 0.22 - artes de energias
-7. Push origin.
-8. Aguarde o Actions ficar verde e atualize pelo próprio app.
+2. Copie a pasta app e os arquivos RELEASE_NOTES.md e RELATORIO-COBERTURA-MYPCARDS.md.
+3. Cole na raiz do repositório e confirme a substituição.
+4. No GitHub Desktop, faça commit e Push origin.
 
-Teste após atualizar:
-- Energia de Água SVE 003/24
-- Energia de Água SVE 011/24
-- Energia de Água SVE 019/24
-- Energia de Água MEE 003/8
+Arquivos alterados:
+- app/build.gradle
+- app/src/main/java/br/com/fichariopokemon/pokedex/MainActivity.java
+- app/src/main/assets/www/app.js
+- app/src/main/assets/www/styles.css
+- app/src/main/assets/www/index.html
+- RELEASE_NOTES.md
+
+Versão: 0.25.0-mypcards-ui (versionCode 26)
