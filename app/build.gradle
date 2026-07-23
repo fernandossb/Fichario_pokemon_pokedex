@@ -10,8 +10,8 @@ android {
         applicationId 'br.com.fichariopokemon.pokedex'
         minSdk 26
         targetSdk 35
-        versionCode 26
-        versionName '0.25.0-mypcards-ui'
+        versionCode 27
+        versionName '0.26.0-cardmarket-catalogo-ampliado'
     }
 
     signingConfigs {

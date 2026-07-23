@@ -16,10 +16,10 @@ const PRICE_CACHE_KEY = 'fichario-pokemon-price-cache-v1';
 const FX_CACHE_KEY = 'fichario-pokemon-fx-cache-v1';
 const LIGA_SET_CACHE_KEY = 'fichario-pokemon-liga-set-cache-v1';
 const PRICE_LOGIC_VERSION_KEY = 'fichario-pokemon-price-logic-version';
-const PRICE_LOGIC_VERSION = 9;
+const PRICE_LOGIC_VERSION = 10;
 const PRICE_CACHE_TTL = 24 * 60 * 60 * 1000;
 const FX_CACHE_TTL = 24 * 60 * 60 * 1000;
-const TCGDEX_API_BASE = 'https://api.tcgdex.net/v2/pt';
+const TCGDEX_API_BASE = 'https://api.tcgdex.net/v2/pt-br';
 const TCGDEX_API_FALLBACK = 'https://api.tcgdex.net/v2/en';
 const FX_API_BASE = 'https://api.frankfurter.dev/v2';
 const LIGA_POKEMON_BASES = ['https://www.ligapokemon.com.br/', 'https://ligapokemon.com.br/'];
@@ -133,9 +133,11 @@ function saveLigaSetCache() {
   saveStoredObject(LIGA_SET_CACHE_KEY, ligaSetCache);
 }
 
-function priceCacheFresh(cardId) {
+function priceCacheFresh(cardId, finish = 'comum') {
   const item = priceCache[cardId];
-  return Boolean(item && Number(item.logicVersion) === PRICE_LOGIC_VERSION && Number(item.fetchedAt) && Date.now() - Number(item.fetchedAt) < PRICE_CACHE_TTL);
+  const kind = finishKind(finish);
+  const quote = item?.quotes?.[kind];
+  return Boolean(item && Number(item.logicVersion) === PRICE_LOGIC_VERSION && quote && Number(quote.fetchedAt) && Date.now() - Number(quote.fetchedAt) < PRICE_CACHE_TTL);
 }
 
 function finishKind(finish) {
@@ -431,7 +433,7 @@ function tcgplayerAverageQuote(tcgplayer, kind, card, remoteIdentity) {
   if (!tcgplayer || !card || !remoteIdentity) return null;
   const metric = tcgplayerMetric(tcgplayer, kind);
   if (!metric) return null;
-  const validation = exactRemoteValidation(card, remoteIdentity, kind);
+  const validation = cardmarketValidation(card, remoteIdentity, kind);
   const finishLabel = kind === 'reverse' ? 'reversa' : kind === 'holo' ? 'holográfica/foil' : 'comum';
   return {
     value: metric.value,
@@ -491,37 +493,57 @@ function cardmarketIdentityFromDetail(detail) {
     image: String(detail?.image || ''),
     rarity: String(detail?.rarity || ''),
     illustrator: String(detail?.illustrator || ''),
+    promotional: Boolean(detail?.variants?.wPromo)
+      || /promo|black star/i.test(String(detail?.set?.name || ''))
+      || /(?:^|[-_.])p(?:$|[-_.])/i.test(String(detail?.set?.id || '')),
   };
+}
+
+function isPromotionalCard(card) {
+  return Boolean(card?.promotional)
+    || Boolean(card?.variants?.wPromo)
+    || /promo|black star/i.test(String(card?.setName || ''))
+    || /(?:^|[-_.])p(?:$|[-_.])/i.test(String(card?.setId || ''));
+}
+
+function enrichLocalCardFromRemote(card, remote) {
+  if (!card || !remote) return;
+  if (remote.illustrator) card.illustrator = remote.illustrator;
+  if (remote.category) card.category = remote.category;
+  if (remote.rarity) card.rarity = remote.rarity;
+  if (remote.variants && typeof remote.variants === 'object') card.variants = { ...remote.variants };
+  card.promotional = Boolean(remote.promotional);
+  if ((!Array.isArray(card.pokemonIds) || !card.pokemonIds.length) && Array.isArray(remote.dexId)) {
+    card.pokemonIds = [...remote.dexId];
+  }
 }
 
 function cardmarketValidation(card, remote, kind) {
   const checks = [];
   const add = (key, label, ok) => checks.push({ key, label, ok: Boolean(ok) });
+  enrichLocalCardFromRemote(card, remote);
+
   const localPokemon = sortedNumberList(card?.pokemonIds);
   const remotePokemon = sortedNumberList(remote?.dexId);
   const variants = remote?.variants || {};
 
-  add('id', 'identificador exato da carta', String(remote?.id || '') === String(card?.id || ''));
+  add('pokedex', 'número do Pokémon', !localPokemon.length || sameNumberList(localPokemon, remotePokemon));
+  add('number', 'número exato da carta', normalizeCollectorId(remote?.localId) === normalizeCollectorId(card?.localId));
   add('setId', 'coleção exata', String(remote?.setId || '') === String(card?.setId || ''));
   add('setName', 'nome da coleção', normalize(remote?.setName) === normalize(card?.setName));
-  add('number', 'número de colecionador', normalizeCollectorId(remote?.localId) === normalizeCollectorId(card?.localId));
-  add('name', 'nome exato da carta', normalize(remote?.name) === normalize(card?.name));
-  if (localPokemon.length) add('pokedex', 'número da Pokédex', sameNumberList(localPokemon, remotePokemon));
-
-  const localImage = canonicalImageBase(card?.imageUrl);
-  const remoteImage = canonicalImageBase(remote?.image);
-  add('art', 'arte vinculada ao mesmo registro', Boolean(localImage && remoteImage && localImage === remoteImage));
+  add('illustrator', 'ilustrador', Boolean(remote?.illustrator) && normalize(remote?.illustrator) === normalize(card?.illustrator));
+  add('promo', 'status promocional', Boolean(remote?.promotional) === isPromotionalCard(card));
 
   let finishOk = false;
   let finishReason = 'acabamento disponível';
   if (kind === 'normal') {
     finishOk = variants.normal === true;
   } else if (kind === 'reverse') {
-    finishOk = variants.reverse === true && variants.holo !== true;
-    if (variants.reverse === true && variants.holo === true) finishReason = 'Cardmarket agrupa reversa e holográfica no mesmo preço foil';
+    finishOk = variants.reverse === true;
+    if (variants.reverse === true && variants.holo === true) finishReason = 'Cardmarket usa o mesmo preço foil para reversa e holográfica';
   } else if (kind === 'holo') {
-    finishOk = variants.holo === true && variants.reverse !== true;
-    if (variants.holo === true && variants.reverse === true) finishReason = 'Cardmarket agrupa holográfica e reversa no mesmo preço foil';
+    finishOk = variants.holo === true;
+    if (variants.holo === true && variants.reverse === true) finishReason = 'Cardmarket usa o mesmo preço foil para holográfica e reversa';
   }
   add('finish', finishReason, finishOk);
 
@@ -536,25 +558,10 @@ function cardmarketValidation(card, remote, kind) {
 
 function cardmarketMetric(cardmarket, kind) {
   const holo = kind === 'holo' || kind === 'reverse';
-  const candidates = holo ? [
-    ['avg-holo', 'média de vendas foil'],
-    ['avg7-holo', 'média foil de 7 dias'],
-    ['trend-holo', 'tendência foil'],
-    ['avg30-holo', 'média foil de 30 dias'],
-    ['avg1-holo', 'média foil de 24 horas'],
-    ['low-holo', 'menor oferta foil'],
-  ] : [
-    ['avg', 'média de vendas'],
-    ['avg7', 'média de 7 dias'],
-    ['trend', 'preço de tendência'],
-    ['avg30', 'média de 30 dias'],
-    ['avg1', 'média de 24 horas'],
-    ['low', 'menor oferta'],
-  ];
-  for (const [field, label] of candidates) {
-    if (hasFiniteNumber(cardmarket?.[field]) && Number(cardmarket[field]) >= 0) {
-      return { field, label, value: Number(cardmarket[field]) };
-    }
+  const field = holo ? 'avg1-holo' : 'avg1';
+  const label = holo ? 'média diária foil (24h)' : 'média diária (24h)';
+  if (hasFiniteNumber(cardmarket?.[field]) && Number(cardmarket[field]) >= 0) {
+    return { field, label, value: Number(cardmarket[field]) };
   }
   return null;
 }
@@ -585,69 +592,22 @@ function cardmarketAverageQuote(cardmarket, kind, card, remoteIdentity) {
 }
 
 
-const nativeMypRequests = new Map();
-
-window.receiveMypCardsPrice = function(requestId, ok, payload, error) {
-  const id = String(requestId || '');
-  const pending = nativeMypRequests.get(id);
-  if (!pending) return;
-  clearTimeout(pending.timeout);
-  nativeMypRequests.delete(id);
-  if (ok) {
-    try {
-      pending.resolve(typeof payload === 'string' ? JSON.parse(payload) : payload);
-    } catch (parseError) {
-      pending.reject(new Error('O MYP Cards respondeu em formato inesperado.'));
-    }
-  } else {
-    pending.reject(new Error(error || 'O MYP Cards não retornou preço.'));
-  }
-};
-
-function fetchMypCardsThroughAndroid(card, timeoutMs = 45000) {
-  if (!window.Android || typeof window.Android.requestMypCards !== 'function') {
-    return Promise.reject(new Error('Consulta nativa ao MYP Cards indisponível nesta versão.'));
-  }
-  return new Promise((resolve, reject) => {
-    const requestId = `myp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const timeout = setTimeout(() => {
-      nativeMypRequests.delete(requestId);
-      reject(new Error('A consulta ao MYP Cards expirou.'));
-    }, timeoutMs);
-    nativeMypRequests.set(requestId, { resolve, reject, timeout });
-    try {
-      window.Android.requestMypCards(
-        requestId,
-        String(card?.name || ''),
-        String(card?.number || card?.localId || ''),
-        String(card?.setName || ''),
-        String(card?.setId || '')
-      );
-    } catch (error) {
-      clearTimeout(timeout);
-      nativeMypRequests.delete(requestId);
-      reject(error);
-    }
-  });
-}
-
-async function fetchMypCardsPricing(cardId) {
+async function fetchCardmarketDailyPricing(cardId, finish = 'comum') {
   const card = cardMap.get(cardId);
   if (!card) throw new Error('Carta não encontrada no catálogo local.');
-  const data = await fetchMypCardsThroughAndroid(card);
-  if (!hasFiniteNumber(data?.brl)) throw new Error(data?.diagnostic || 'O MYP Cards não encontrou esta impressão.');
+  const pricing = await fetchTcgDexPricing(cardId);
+  const kind = finishKind(finish);
+  const quote = cardmarketAverageQuote(pricing.cardmarket, kind, card, pricing.identity);
+  if (!quote) {
+    throw new Error(`Cardmarket sem média diária de 24 horas para o acabamento ${kind}.`);
+  }
+  const converted = quoteInBrl(quote, pricing.fetchedAt);
+  if (!converted) throw new Error('Cotação EUR/BRL indisponível.');
   return {
-    brl: Number(data.brl),
-    value: Number(data.brl),
-    currency: 'BRL',
-    source: 'mypcards',
-    provider: 'MYP Cards',
-    label: data.metric === 'lowest' ? 'MYP Cards · menor oferta' : 'MYP Cards · mediana',
-    metric: data.metric || 'median',
-    url: data.url || '',
-    matchedCode: data.matchedCode || '',
-    diagnostic: data.diagnostic || '',
-    fetchedAt: Date.now(),
+    ...converted,
+    detail: pricing.detail,
+    identity: pricing.identity,
+    locale: pricing.locale,
   };
 }
 
@@ -660,33 +620,15 @@ function fxRate(currency) {
 function automaticPriceQuote(cardId, finish = 'comum') {
   const cached = priceCache[cardId];
   const card = cardMap.get(cardId);
-  const quote = cached?.mypcards;
-  if (!quote || !card || !hasFiniteNumber(quote.brl)) return null;
   const kind = finishKind(finish);
-  const brl = Math.round(Number(quote.brl) * 100) / 100;
+  const quote = cached?.quotes?.[kind];
+  if (!quote || !card || !hasFiniteNumber(quote.brl)) return null;
   return {
-    brl,
-    value: brl,
-    currency: 'BRL',
-    rate: 1,
-    label: quote.label || 'MYP Cards · mediana',
-    source: 'mypcards',
-    provider: 'MYP Cards',
-    fetchedAt: cached.fetchedAt || quote.fetchedAt || null,
-    confidence: 'verified',
-    verified: true,
-    usable: true,
-    url: quote.url || '',
-    fingerprint: [card.id, card.setId, card.localId, kind, brl, 'mypcards'].join('|'),
-    validation: {
-      reasons: [],
-      checks: [
-        { key: 'local-id', label: 'identificação pelo catálogo local', ok: true },
-        { key: 'set', label: 'coleção comparada no MYP Cards', ok: true },
-        { key: 'number', label: 'número de colecionador comparado no MYP Cards', ok: true },
-        { key: 'source', label: 'preço exclusivamente do MYP Cards', ok: true },
-      ],
-    },
+    ...quote,
+    label: quote.label || 'Cardmarket · média diária (24h)',
+    source: 'cardmarket',
+    provider: 'Cardmarket via TCGdex',
+    fingerprint: quote.fingerprint || [card.id, card.setId, card.localId, kind, quote.brl, 'cardmarket-avg1'].join('|'),
   };
 }
 
@@ -703,9 +645,9 @@ function storedAutomaticPriceQuote(variant) {
     && variant.automaticPriceFingerprint === variant.automaticPriceAcceptedFingerprint;
   return {
     brl: Number(variant.automaticEstimatedValue),
-    label: variant.automaticPriceLabel || 'MYP Cards',
-    source: variant.automaticPriceSource || 'mypcards',
-    provider: variant.automaticPriceProvider || 'MYP Cards',
+    label: variant.automaticPriceLabel || 'Cardmarket · média diária (24h)',
+    source: variant.automaticPriceSource || 'cardmarket',
+    provider: variant.automaticPriceProvider || 'Cardmarket via TCGdex',
     value: nullableNumber(variant.automaticPriceOriginalValue),
     currency: variant.automaticPriceCurrency || 'BRL',
     fetchedAt: variant.automaticPriceUpdatedAt || null,
@@ -745,9 +687,9 @@ function applyAutomaticPriceToVariant(cardId, variant) {
     || JSON.stringify(variant.automaticPriceValidationReasons || []) !== JSON.stringify(nextReasons)
     || JSON.stringify(variant.automaticPriceValidationChecks || []) !== JSON.stringify(nextChecks);
   variant.automaticEstimatedValue = nextValue;
-  variant.automaticPriceSource = quote.source || 'mypcards';
-  variant.automaticPriceLabel = quote.label || 'MYP Cards';
-  variant.automaticPriceProvider = quote.provider || 'MYP Cards';
+  variant.automaticPriceSource = quote.source || 'cardmarket';
+  variant.automaticPriceLabel = quote.label || 'Cardmarket · média diária (24h)';
+  variant.automaticPriceProvider = quote.provider || 'Cardmarket via TCGdex';
   variant.automaticPriceOriginalValue = nullableNumber(quote.value);
   variant.automaticPriceCurrency = quote.currency || 'BRL';
   variant.automaticPriceUpdatedAt = nextUpdated;
@@ -817,24 +759,31 @@ async function loadFxRates(force = false) {
   return fxCache;
 }
 
-async function fetchCardPricing(cardId, force = false) {
-  if (!force && priceCacheFresh(cardId)) return priceCache[cardId];
-  if (priceRequests.has(cardId)) return priceRequests.get(cardId);
+async function fetchCardPricing(cardId, force = false, finish = 'comum') {
+  const kind = finishKind(finish);
+  if (!force && priceCacheFresh(cardId, finish)) return priceCache[cardId];
+  const requestKey = `${cardId}|${kind}`;
+  if (priceRequests.has(requestKey)) return priceRequests.get(requestKey);
   const request = (async () => {
     const card = cardMap.get(cardId);
     if (!card) throw new Error('Carta não encontrada no catálogo local.');
-    const mypcards = await fetchMypCardsPricing(cardId);
+    await ensureFxRates(['EUR'], force);
+    const cardmarket = await fetchCardmarketDailyPricing(cardId, finish);
+    cardmarket.kind = kind;
+    cardmarket.fetchedAt = Date.now();
+    const previous = priceCache[cardId] || {};
     priceCache[cardId] = {
+      ...previous,
       logicVersion: PRICE_LOGIC_VERSION,
       fetchedAt: Date.now(),
-      mypcards,
-      diagnostics: mypcards.diagnostic ? [mypcards.diagnostic] : [],
-      identity: { id: card.id, setId: card.setId, localId: card.localId, name: card.name },
+      quotes: { ...(previous.quotes || {}), [kind]: cardmarket },
+      diagnostics: cardmarket.validation?.reasons || [],
+      identity: cardmarket.identity || { id: card.id, setId: card.setId, localId: card.localId, name: card.name },
     };
     savePriceCache();
     return priceCache[cardId];
-  })().finally(() => priceRequests.delete(cardId));
-  priceRequests.set(cardId, request);
+  })().finally(() => priceRequests.delete(requestKey));
+  priceRequests.set(requestKey, request);
   return request;
 }
 
@@ -997,7 +946,7 @@ async function init() {
     // Apenas caches produzidos pela lógica atual podem ser persistidos.
     let migratedCachedPrices = false;
     for (const cardId of Object.keys(state.entries)) {
-      if (priceCacheFresh(cardId)) migratedCachedPrices = persistAutomaticPricesForCard(cardId, false) || migratedCachedPrices;
+      if (variantsFor(cardId).some(variant => priceCacheFresh(cardId, variant.finish || 'comum'))) migratedCachedPrices = persistAutomaticPricesForCard(cardId, false) || migratedCachedPrices;
     }
     if (migratedCachedPrices) saveState();
     renderTabs();
@@ -1375,13 +1324,13 @@ function pricingPanel() {
   const latest = latestPriceFetch();
   return `<section class="price-update-card">
     <div class="catalog-update-heading">
-      <div><strong>Preços brasileiros</strong><span>${counts.priced} de ${counts.owned} cartas próprias com valor aceito${counts.pending ? ` · ${counts.pending} aguardando validação` : ''}${latest ? ` · última consulta ${esc(formatPriceDate(latest))}` : ''}</span></div>
-      <span class="online-badge">Liga + Cardmarket + TCGplayer</span>
+      <div><strong>Preços Cardmarket</strong><span>${counts.priced} de ${counts.owned} cartas próprias com valor aceito${counts.pending ? ` · ${counts.pending} aguardando validação` : ''}${latest ? ` · última consulta ${esc(formatPriceDate(latest))}` : ''}</span></div>
+      <span class="online-badge">Cardmarket AVG1</span>
     </div>
-    <p>Prioridade: valor manual → Liga Pokémon → média Cardmarket/TCGplayer via TCGdex. A identificação usa coleção e número exatos do catálogo local.</p>
+    <p>Prioridade: valor manual → média diária Cardmarket das últimas 24 horas. A identificação valida Pokémon, número, coleção, ilustrador, acabamento e status promocional.</p>
     ${priceUpdating ? `<div class="catalog-progress"><div class="progress"><span style="width:${progress}%"></span></div><small>${esc(priceUpdateMessage || 'Consultando preços...')}</small></div>` : ''}
     <button class="primary-btn" ${priceUpdating ? 'disabled' : ''} onclick="startOwnedPriceUpdate()">${priceUpdating ? 'Atualizando...' : 'Atualizar preços da coleção'}</button>
-    ${priceUpdateFailures ? `<div class="catalog-last-result">${priceUpdateFailures} carta(s) não retornaram preço em nenhuma fonte nesta tentativa.</div>` : ''}
+    ${priceUpdateFailures ? `<div class="catalog-last-result">${priceUpdateFailures} carta(s) não possuem média diária AVG1 no Cardmarket nesta tentativa.</div>` : ''}
   </section>`;
 }
 
@@ -1394,59 +1343,64 @@ function setPriceUpdateProgress(message, current, total) {
 
 async function startOwnedPriceUpdate() {
   if (priceUpdating) return;
-  const ownedIds = Object.keys(state.entries).filter(cardId => quantityFor(cardId) > 0 && cardMap.has(cardId));
-  if (!ownedIds.length) return notify('Nenhuma carta cadastrada para atualizar.');
+  const targets = [];
+  const seen = new Set();
+  for (const cardId of Object.keys(state.entries)) {
+    if (quantityFor(cardId) <= 0 || !cardMap.has(cardId)) continue;
+    const variants = variantsFor(cardId).length ? variantsFor(cardId) : [defaultVariant(0)];
+    for (const variant of variants) {
+      const finish = variant.finish || 'comum';
+      const key = `${cardId}|${finishKind(finish)}`;
+      if (!seen.has(key)) { seen.add(key); targets.push({ cardId, finish }); }
+    }
+  }
+  if (!targets.length) return notify('Nenhuma carta cadastrada para atualizar.');
   priceUpdating = true;
   priceUpdateFailures = 0;
-  setPriceUpdateProgress('Atualizando cotações para reais...', 0, ownedIds.length);
-  try { await loadFxRates(false); } catch (_) {}
+  setPriceUpdateProgress('Atualizando médias diárias do Cardmarket...', 0, targets.length);
+  try { await ensureFxRates(['EUR'], false); } catch (_) {}
 
-  // Migra imediatamente os preços já consultados no Checkpoint 4 para dentro das cartas.
-  let restoredFromCache = 0;
-  for (const cardId of ownedIds) {
-    if (priceCache[cardId] && persistAutomaticPricesForCard(cardId, false)) restoredFromCache++;
-  }
-  if (restoredFromCache) saveState();
-
-  const targets = ownedIds.filter(cardId => !priceCacheFresh(cardId));
-  if (!targets.length) {
+  const pendingTargets = targets.filter(item => !priceCacheFresh(item.cardId, item.finish));
+  if (!pendingTargets.length) {
+    let saved = 0;
+    for (const cardId of new Set(targets.map(item => item.cardId))) if (persistAutomaticPricesForCard(cardId, false)) saved++;
+    if (saved) saveState();
     priceUpdating = false;
     priceUpdateMessage = '';
     renderKeepingScroll();
-    notify(restoredFromCache
-      ? `${restoredFromCache} preço(s) foram salvos nas cartas.`
-      : 'Os preços já foram consultados e estão salvos nas cartas.');
+    notify('As médias diárias do Cardmarket já estão atualizadas.');
     return;
   }
 
-  priceUpdateTotal = targets.length;
+  priceUpdateTotal = pendingTargets.length;
   let cursor = 0;
   let completed = 0;
-  let savedCards = restoredFromCache;
+  const touchedCards = new Set();
   const worker = async () => {
-    while (cursor < targets.length) {
+    while (cursor < pendingTargets.length) {
       const index = cursor++;
-      const cardId = targets[index];
+      const { cardId, finish } = pendingTargets[index];
       const card = cardMap.get(cardId);
-      setPriceUpdateProgress(`Consultando ${card?.name || cardId}...`, completed, targets.length);
+      setPriceUpdateProgress(`Cardmarket: ${card?.name || cardId} (${finish})...`, completed, pendingTargets.length);
       try {
-        await fetchCardPricing(cardId, true);
-        if (persistAutomaticPricesForCard(cardId, false)) savedCards++;
+        await fetchCardPricing(cardId, true, finish);
+        touchedCards.add(cardId);
       } catch (_) {
         priceUpdateFailures++;
       }
       completed++;
-      await new Promise(resolve => setTimeout(resolve, 350));
-      if (completed % 10 === 0 || completed === targets.length) saveState();
-      setPriceUpdateProgress(`Preços salvos: ${completed} de ${targets.length}`, completed, targets.length);
+      await new Promise(resolve => setTimeout(resolve, 300));
+      setPriceUpdateProgress(`Consultas: ${completed} de ${pendingTargets.length}`, completed, pendingTargets.length);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(2, targets.length) }, () => worker()));
+  await Promise.all(Array.from({ length: Math.min(2, pendingTargets.length) }, () => worker()));
+  let savedCards = 0;
+  for (const cardId of touchedCards) if (persistAutomaticPricesForCard(cardId, false)) savedCards++;
   saveState();
   priceUpdating = false;
   priceUpdateMessage = '';
   renderKeepingScroll();
-  notify(`Preços consultados: ${targets.length - priceUpdateFailures} · salvos nas cartas: ${savedCards}${priceUpdateFailures ? ` · ${priceUpdateFailures} falha(s)` : ''}.`);
+  notify(`Cardmarket: ${pendingTargets.length - priceUpdateFailures} média(s) diária(s) encontrada(s) · ${priceUpdateFailures} sem AVG1.`);
 }
 
 function renderDashboard() {
@@ -1519,7 +1473,7 @@ function catalogUpdatePanel() {
   return `<section class="catalog-update-card">
     <div class="catalog-update-heading">
       <div><strong>Atualização das coleções</strong><span>${esc(lastResult)}</span></div>
-      <span class="online-badge">TCGdex PT-BR</span>
+      <span class="online-badge">TCGdex PT-BR + EN</span>
     </div>
     <p>Verifica novas expansões e cartas sem apagar quantidades, variantes, observações ou outros dados da sua coleção.</p>
     ${catalogUpdating ? `<div class="catalog-progress"><div class="progress"><span style="width:${progress}%"></span></div><small>${esc(catalogUpdateMessage || 'Preparando atualização...')}</small></div>` : ''}
@@ -1604,107 +1558,107 @@ function normalizeRemoteCard(remote, set) {
     number: official ? `${localId}/${official}` : localId,
     rarity: remote?.rarity || null,
     imageUrl: cardImageUrl(remote?.image),
-    pokemonIds: inferPokemonIds(remote?.name),
+    pokemonIds: Array.isArray(remote?.dexId) && remote.dexId.length ? remote.dexId : inferPokemonIds(remote?.name),
+    illustrator: remote?.illustrator || null,
+    category: remote?.category || null,
+    variants: remote?.variants && typeof remote.variants === 'object' ? remote.variants : null,
+    promotional: Boolean(remote?.variants?.wPromo)
+      || /promo|black star/i.test(String(set.name || ''))
+      || /(?:^|[-_.])p(?:$|[-_.])/i.test(String(set.id || '')),
   };
+}
+
+async function fetchCatalogLocale(base, localeLabel) {
+  const remoteSets = await fetchJsonWithTimeout(`${base}/sets`, 45000);
+  if (!Array.isArray(remoteSets)) throw new Error(`${localeLabel}: lista de coleções inválida.`);
+  const sets = new Map();
+  const cards = new Map();
+  let failures = 0;
+  for (let index = 0; index < remoteSets.length; index++) {
+    const remote = remoteSets[index];
+    if (!remote?.id) continue;
+    setCatalogUpdateProgress(`${localeLabel}: ${remote.name || remote.id}...`, index, remoteSets.length);
+    try {
+      const detail = await fetchJsonWithTimeout(`${base}/sets/${encodeURIComponent(remote.id)}`, 35000);
+      const set = normalizeRemoteSet(detail, remote);
+      if (!set.id) continue;
+      sets.set(set.id, set);
+      for (const remoteCard of Array.isArray(detail?.cards) ? detail.cards : []) {
+        const normalized = normalizeRemoteCard(remoteCard, set);
+        if (normalized.id) cards.set(normalized.id, normalized);
+      }
+    } catch (_) {
+      failures++;
+    }
+  }
+  return { sets, cards, failures };
 }
 
 async function startCatalogUpdate() {
   if (catalogUpdating) return;
   catalogUpdating = true;
-  setCatalogUpdateProgress('Conectando ao catálogo TCGdex...', 0, 1, true);
+  setCatalogUpdateProgress('Conectando aos catálogos TCGdex PT-BR e EN...', 0, 1, true);
 
   try {
-    const remoteSets = await fetchJsonWithTimeout(`${TCGDEX_API_BASE}/sets`);
-    if (!Array.isArray(remoteSets)) throw new Error('O servidor retornou uma lista inválida.');
+    const localSets = new Map((catalog.sets || []).map(item => [item.id, { ...item }]));
+    const localCards = new Map((catalog.cards || []).map(item => [item.id, { ...item }]));
+    const oldCardCount = localCards.size;
+    const oldSetCount = localSets.size;
 
-    const localSetMap = new Map((catalog.sets || []).map(item => [item.id, item]));
-    const setMap = new Map((catalog.sets || []).map(item => [item.id, { ...item }]));
-    const cardMapForUpdate = new Map((catalog.cards || []).map(item => [item.id, { ...item }]));
-    const changed = remoteSets.filter(remote => remote?.id && setNeedsCatalogRefresh(localSetMap.get(remote.id), remote));
-    const setsAdded = changed.filter(remote => !localSetMap.has(remote.id)).length;
-    const oldCardCount = cardMapForUpdate.size;
-    let setsUpdated = 0;
-    let failures = 0;
+    let ptResult = { sets: new Map(), cards: new Map(), failures: 0 };
+    let enResult = { sets: new Map(), cards: new Map(), failures: 0 };
+    try { ptResult = await fetchCatalogLocale(TCGDEX_API_BASE, 'Português'); } catch (_) {}
+    try { enResult = await fetchCatalogLocale(TCGDEX_API_FALLBACK, 'Inglês'); } catch (_) {}
+    if (!ptResult.cards.size && !enResult.cards.size) throw new Error('Nenhum dos catálogos online respondeu.');
 
-    if (!changed.length) {
-      const result = {
-        updatedAt: Date.now(), setsAdded: 0, setsUpdated: 0, cardsAdded: 0,
-        setsTotal: setMap.size, cardsTotal: cardMapForUpdate.size,
-      };
-      saveCatalogUpdateMeta(result);
-      catalogUpdating = false;
-      catalogUpdateMessage = '';
-      renderKeepingScroll();
-      notify('O catálogo já está atualizado.');
-      return;
+    // Inglês amplia a cobertura; português sobrescreve nomes e imagens quando disponível.
+    for (const [id, set] of enResult.sets) localSets.set(id, { ...(localSets.get(id) || {}), ...set });
+    for (const [id, card] of enResult.cards) localCards.set(id, { ...(localCards.get(id) || {}), ...card, catalogLocale: 'en' });
+    for (const [id, set] of ptResult.sets) localSets.set(id, { ...(localSets.get(id) || {}), ...set });
+    for (const [id, card] of ptResult.cards) {
+      const existing = localCards.get(id) || {};
+      localCards.set(id, {
+        ...existing,
+        ...card,
+        imageUrl: card.imageUrl || existing.imageUrl || null,
+        illustrator: card.illustrator || existing.illustrator || null,
+        variants: card.variants || existing.variants || null,
+        pokemonIds: card.pokemonIds?.length ? card.pokemonIds : (existing.pokemonIds || []),
+        catalogLocale: 'pt-br',
+      });
     }
-
-    catalogUpdateTotal = changed.length;
-    for (let index = 0; index < changed.length; index++) {
-      const remote = changed[index];
-      setCatalogUpdateProgress(`Baixando ${remote.name || remote.id}...`, index, changed.length);
-      try {
-        const detail = await fetchJsonWithTimeout(`${TCGDEX_API_BASE}/sets/${encodeURIComponent(remote.id)}`);
-        const set = normalizeRemoteSet(detail, remote);
-        if (!set.id) throw new Error('Coleção sem identificador.');
-        setMap.set(set.id, set);
-        const remoteCards = Array.isArray(detail?.cards) ? detail.cards : [];
-        for (const remoteCard of remoteCards) {
-          const normalized = normalizeRemoteCard(remoteCard, set);
-          if (!normalized.id) continue;
-          const existing = cardMapForUpdate.get(normalized.id) || {};
-          cardMapForUpdate.set(normalized.id, {
-            ...existing,
-            ...normalized,
-            rarity: normalized.rarity || existing.rarity || null,
-            imageUrl: normalized.imageUrl || existing.imageUrl || null,
-            pokemonIds: normalized.pokemonIds?.length ? normalized.pokemonIds : (existing.pokemonIds || []),
-          });
-        }
-        setsUpdated++;
-      } catch (_) {
-        failures++;
-      }
-      setCatalogUpdateProgress(`Processando ${remote.name || remote.id}...`, index + 1, changed.length);
-    }
-
-    if (!setsUpdated && failures) throw new Error('Não foi possível baixar as coleções alteradas.');
 
     const updatedCatalog = {
       version: new Date().toISOString(),
-      source: 'TCGdex PT-BR + catálogo local',
-      sets: [...setMap.values()],
-      cards: [...cardMapForUpdate.values()],
+      source: 'TCGdex PT-BR + EN + catálogo local',
+      sets: [...localSets.values()],
+      cards: [...localCards.values()],
     };
-    setCatalogUpdateProgress('Salvando o catálogo para uso offline...', changed.length, changed.length, true);
+    setCatalogUpdateProgress('Salvando catálogo ampliado para uso offline...', 1, 1, true);
     await saveUpdatedCatalog(updatedCatalog);
     catalog = updatedCatalog;
     rebuildCatalogIndexes();
 
     const result = {
       updatedAt: Date.now(),
-      setsAdded,
-      setsUpdated,
-      cardsAdded: Math.max(0, cardMapForUpdate.size - oldCardCount),
-      setsTotal: setMap.size,
-      cardsTotal: cardMapForUpdate.size,
-      failures,
+      setsAdded: Math.max(0, localSets.size - oldSetCount),
+      setsUpdated: localSets.size,
+      cardsAdded: Math.max(0, localCards.size - oldCardCount),
+      setsTotal: localSets.size,
+      cardsTotal: localCards.size,
+      failures: ptResult.failures + enResult.failures,
     };
     saveCatalogUpdateMeta(result);
     ui.cardLimit = 80;
     catalogUpdating = false;
     catalogUpdateMessage = '';
     render();
-    const warning = failures ? ` (${failures} coleção(ões) não responderam)` : '';
-    notify(`Coleções atualizadas: +${result.setsAdded} coleções e +${result.cardsAdded} cartas${warning}.`);
+    notify(`Catálogo ampliado: ${result.cardsTotal.toLocaleString('pt-BR')} cartas (+${result.cardsAdded.toLocaleString('pt-BR')}).`);
   } catch (error) {
     catalogUpdating = false;
     catalogUpdateMessage = '';
     renderKeepingScroll();
-    const message = error?.name === 'AbortError'
-      ? 'A conexão demorou demais. Tente novamente.'
-      : `Não foi possível atualizar: ${error?.message || 'erro de conexão'}`;
-    notify(message);
+    notify(`Não foi possível atualizar: ${error?.message || 'erro de conexão'}`);
   }
 }
 
@@ -1923,16 +1877,16 @@ function automaticPriceBox(cardId, finish = 'comum', variantId = '') {
     return `<div class="automatic-price-card ${verified ? 'verified-price' : 'review-price'}">
       <strong>${esc(converted)}</strong>
       <span>${esc(source)}${original ? ` · ${esc(original)}` : ''}</span>
-      <small>${displayQuote.stored ? 'Valor salvo na carta' : 'Consulta multifonte'} ${esc(formatPriceDate(displayQuote.fetchedAt))}${displayQuote.rate != null ? ` · câmbio ${displayQuote.currency}/BRL ${Number(displayQuote.rate).toLocaleString('pt-BR', { maximumFractionDigits: 4 })}` : ''}</small>
+      <small>${displayQuote.stored ? 'Valor salvo na carta' : 'Consulta Cardmarket'} ${esc(formatPriceDate(displayQuote.fetchedAt))}${displayQuote.rate != null ? ` · câmbio ${displayQuote.currency}/BRL ${Number(displayQuote.rate).toLocaleString('pt-BR', { maximumFractionDigits: 4 })}` : ''}</small>
       ${statusHtml}
       ${validationButton}
       <button type="button" class="price-refresh-btn" ${loading ? 'disabled' : ''} onclick="event.preventDefault();event.stopPropagation();updateCardPrice('${esc(cardId)}', document.getElementById('regFinish')?.value || '${esc(finish)}', true)">${loading ? 'Consultando...' : 'Atualizar agora'}</button>
     </div>`;
   }
-  if (loading) return `<div class="automatic-price-card loading-price"><strong>Consultando Liga, Cardmarket e TCGplayer...</strong><span>Aguarde alguns segundos.</span></div>`;
+  if (loading) return `<div class="automatic-price-card loading-price"><strong>Consultando média diária do Cardmarket...</strong><span>Aguarde alguns segundos.</span></div>`;
   return `<div class="automatic-price-card empty-price">
-    <strong>Ainda sem preço nas fontes disponíveis</strong>
-    <span>Ordem: valor manual → Liga → Cardmarket/TCGplayer.</span>
+    <strong>Sem média diária no Cardmarket</strong>
+    <span>Ordem: valor manual → Cardmarket AVG1 (24h).</span>
     <button type="button" class="price-refresh-btn" onclick="event.preventDefault();event.stopPropagation();updateCardPrice('${esc(cardId)}', document.getElementById('regFinish')?.value || '${esc(finish)}', true)">Consultar preço</button>
   </div>`;
 }
@@ -1961,16 +1915,16 @@ function confirmCardmarketPrice(cardId, variantId, finish) {
 async function updateCardPrice(cardId, finish = 'comum', force = false) {
   refreshAutomaticPriceField(cardId, finish);
   try {
-    await fetchCardPricing(cardId, force);
+    await fetchCardPricing(cardId, force, finish);
     const saved = persistAutomaticPricesForCard(cardId, true);
     refreshAutomaticPriceField(cardId, finish);
     renderKeepingScroll();
     const quote = automaticPriceQuote(cardId, finish);
     notify(quote
       ? (quote.confidence === 'verified'
-        ? (saved ? 'Preço multifonte salvo' : 'Preço multifonte encontrado')
-        : 'Preço encontrado em fonte externa')
-      : 'Nenhuma fonte retornou preço para esta carta.');
+        ? (saved ? 'Média diária do Cardmarket salva' : 'Média diária do Cardmarket encontrada')
+        : 'Preço Cardmarket encontrado para revisão')
+      : 'O Cardmarket não retornou média diária para esta carta.');
   } catch (error) {
     refreshAutomaticPriceField(cardId, finish);
     const message = error?.name === 'AbortError' ? 'A consulta demorou demais.' : String(error?.message || 'Não foi possível consultar o preço agora.');
@@ -1981,11 +1935,11 @@ async function updateCardPrice(cardId, finish = 'comum', force = false) {
 }
 
 function ensureCardPriceLoaded(cardId, finish) {
-  if (priceCacheFresh(cardId)) {
+  if (priceCacheFresh(cardId, finish)) {
     if (persistAutomaticPricesForCard(cardId, true)) renderKeepingScroll();
     return;
   }
-  if (priceRequests.has(cardId)) return;
+  if (priceRequests.has(`${cardId}|${finishKind(finish)}`)) return;
   setTimeout(() => updateCardPrice(cardId, finish, false), 120);
 }
 

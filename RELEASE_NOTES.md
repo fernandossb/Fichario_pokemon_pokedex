@@ -1,8 +1,10 @@
-# Versão 0.25 — MYP Cards e melhorias no cadastro
+# Versão 0.26 — Cardmarket e catálogo ampliado
 
-- Preços automáticos exclusivamente pelo MYP Cards.
-- Prioridade para a Mediana MYP; fallback para a menor oferta pública disponível.
-- Foto da carta ampliada no cadastro para proporção próxima de uma carta física.
-- Quantidade controlada por botões de menos e mais ao lado do número.
-- Correção dos textos Fichário, Pokémon, catálogo, coleção, Pokédex e do botão ⋮.
-- Mantidos backup, imagens locais, assinatura definitiva e atualização automática.
+- Preço automático exclusivamente pelo Cardmarket.
+- Usa a média diária de vendas das últimas 24 horas (`AVG1`).
+- Para cartas foil, usa `Foil AVG1`.
+- Validação por número do Pokémon, número da carta, coleção, ilustrador, acabamento e status promocional.
+- Catálogo online ampliado combinando TCGdex PT-BR e inglês.
+- Cartas disponíveis apenas no catálogo inglês também passam a aparecer.
+- O total real é mostrado depois da atualização online; não é fixado artificialmente em 17.000.
+- Mantém o último preço salvo quando não existe média diária.
