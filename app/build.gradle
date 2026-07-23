@@ -10,8 +10,8 @@ android {
         applicationId 'br.com.fichariopokemon.pokedex'
         minSdk 26
         targetSdk 35
-        versionCode 23
-        versionName '0.21.0-imagens-cascata'
+        versionCode 24
+        versionName '0.22.0-energias-imagens'
     }
 
     signingConfigs {

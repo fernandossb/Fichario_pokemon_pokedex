@@ -13,8 +13,8 @@
  * 7. placeholder com botão "Recarregar arte"
  */
 (() => {
-  const CACHE_KEY = 'fichario-pokemon-image-cascade-cache-v2';
-  const DIAGNOSTIC_KEY = 'fichario-pokemon-image-cascade-diagnostics-v2';
+  const CACHE_KEY = 'fichario-pokemon-image-cascade-cache-v3';
+  const DIAGNOSTIC_KEY = 'fichario-pokemon-image-cascade-diagnostics-v3';
   const CACHE_TTL = 90 * 24 * 60 * 60 * 1000;
   const TCGDEX_ROOT = 'https://api.tcgdex.net/v2';
   const POKEMON_TCG_ROOT = 'https://api.pokemontcg.io/v2/cards';
@@ -29,8 +29,11 @@
    * indexada nas APIs. Use sempre uma URL de imagem estável e pública.
    */
   const IMAGE_OVERRIDES = Object.freeze({
-    // Exemplo:
-    // 'mep-001': 'https://servidor-estavel/imagens/mep-001.jpg',
+    // Coleções de energia cujo endpoint pode omitir o campo image.
+    'sve-003': 'https://assets.tcgdex.net/en/sv/sve/003',
+    'sve-011': 'https://assets.tcgdex.net/en/sv/sve/011',
+    'sve-019': 'https://assets.tcgdex.net/en/sv/sve/019',
+    'mee-003': 'https://assets.tcgdex.net/en/me/mee/003',
   });
 
   try { cache = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}') || {}; } catch (_) { cache = {}; }
@@ -90,6 +93,65 @@
     return source
       .replace('://assets.tcgdex.net/pt-br/', '://assets.tcgdex.net/en/')
       .replace('://assets.tcgdex.net/pt/', '://assets.tcgdex.net/en/');
+  }
+
+
+  const ENERGY_NAME_MAP = Object.freeze({
+    agua: { english: 'Basic Water Energy', type: 'Water', number: '003' },
+    water: { english: 'Basic Water Energy', type: 'Water', number: '003' },
+    fogo: { english: 'Basic Fire Energy', type: 'Fire', number: '002' },
+    fire: { english: 'Basic Fire Energy', type: 'Fire', number: '002' },
+    grama: { english: 'Basic Grass Energy', type: 'Grass', number: '001' },
+    planta: { english: 'Basic Grass Energy', type: 'Grass', number: '001' },
+    grass: { english: 'Basic Grass Energy', type: 'Grass', number: '001' },
+    eletrica: { english: 'Basic Lightning Energy', type: 'Lightning', number: '004' },
+    eletrico: { english: 'Basic Lightning Energy', type: 'Lightning', number: '004' },
+    lightning: { english: 'Basic Lightning Energy', type: 'Lightning', number: '004' },
+    psiquica: { english: 'Basic Psychic Energy', type: 'Psychic', number: '005' },
+    psychic: { english: 'Basic Psychic Energy', type: 'Psychic', number: '005' },
+    lutador: { english: 'Basic Fighting Energy', type: 'Fighting', number: '006' },
+    fighting: { english: 'Basic Fighting Energy', type: 'Fighting', number: '006' },
+    noturna: { english: 'Basic Darkness Energy', type: 'Darkness', number: '007' },
+    escuridao: { english: 'Basic Darkness Energy', type: 'Darkness', number: '007' },
+    darkness: { english: 'Basic Darkness Energy', type: 'Darkness', number: '007' },
+    metal: { english: 'Basic Metal Energy', type: 'Metal', number: '008' },
+  });
+
+  function energyInfo(card) {
+    const normalized = normalize(card?.name);
+    if (!normalized.includes('energia') && !normalized.includes('energy')) return null;
+    for (const [token, info] of Object.entries(ENERGY_NAME_MAP)) {
+      if (normalized.includes(token)) return info;
+    }
+    return { english: 'Basic Energy', type: '', number: '' };
+  }
+
+  function tcgdexSeriesForSet(setId) {
+    const id = String(setId || '').toLowerCase();
+    if (id.startsWith('sv') || id === 'sve' || id === 'svp') return 'sv';
+    if (id.startsWith('me') || id === 'mee' || id === 'mep') return 'me';
+    if (id.startsWith('swsh')) return 'swsh';
+    if (id.startsWith('sm')) return 'sm';
+    if (id.startsWith('xy')) return 'xy';
+    if (id.startsWith('bw')) return 'bw';
+    if (id.startsWith('hgss')) return 'hgss';
+    if (id.startsWith('dp')) return 'dp';
+    if (id.startsWith('base')) return 'base';
+    return '';
+  }
+
+  function directTcgdexAssetCandidates(card) {
+    const setId = String(card?.setId || '').trim();
+    const series = tcgdexSeriesForSet(setId);
+    if (!series || !setId) return [];
+    const urls = [];
+    for (const localId of localIdVariants(card)) {
+      for (const language of ['pt', 'en']) {
+        const root = `https://assets.tcgdex.net/${language}/${series}/${setId}/${localId}`;
+        urls.push(...imageCandidates(root));
+      }
+    }
+    return [...new Set(urls)];
   }
 
   function remember(cardId, url, source) {
@@ -187,6 +249,58 @@
     const candidateSetId = normalize(candidate?.set?.id);
     if (expectedSetId && candidateSetId === expectedSetId) score += 35;
     return score;
+  }
+
+
+  function pokemonEnergyScore(candidate, card, set, info) {
+    let score = pokemonApiScore(candidate, card, set);
+    const supertype = normalize(candidate?.supertype);
+    const subtypes = Array.isArray(candidate?.subtypes) ? candidate.subtypes.map(normalize) : [];
+    const types = Array.isArray(candidate?.types) ? candidate.types.map(normalize) : [];
+    if (supertype === 'energy') score += 80;
+    if (subtypes.includes('basic')) score += 30;
+    if (info?.type && types.includes(normalize(info.type))) score += 70;
+    const candidateName = normalize(candidate?.name);
+    if (info?.english && candidateName === normalize(info.english)) score += 70;
+    return score;
+  }
+
+  async function pokemonTcgEnergyImages(card) {
+    const info = energyInfo(card);
+    if (!info) return [];
+    const provider = 'pokemontcg-energy-api';
+    const set = setFor(card);
+    const number = String(card?.localId || card?.number || '').split('/')[0].replace(/^0+(?=\d)/, '');
+    const queries = [];
+    if (info.english && number) queries.push(`name:"${escapeLucene(info.english)}" number:${escapeLucene(number)} supertype:Energy`);
+    if (info.english) queries.push(`name:"${escapeLucene(info.english)}" supertype:Energy`);
+    if (number) queries.push(`number:${escapeLucene(number)} supertype:Energy`);
+    queries.push('supertype:Energy');
+
+    let candidates = [];
+    for (const query of queries) {
+      const url = `${POKEMON_TCG_ROOT}?q=${encodeURIComponent(query)}&pageSize=250&select=id,name,number,supertype,subtypes,types,set,images`;
+      const response = await fetchJson(url, provider, card.id, 18000);
+      if (Array.isArray(response?.data) && response.data.length) {
+        candidates = response.data;
+        const rankedNow = candidates
+          .map(item => ({ item, score: pokemonEnergyScore(item, card, set, info) }))
+          .sort((a, b) => b.score - a.score);
+        if (rankedNow[0]?.score >= 150) break;
+      }
+    }
+
+    const ranked = candidates
+      .map(item => ({ item, score: pokemonEnergyScore(item, card, set, info) }))
+      .filter(row => row.score >= 120)
+      .sort((a, b) => b.score - a.score);
+    const urls = [];
+    for (const row of ranked.slice(0, 5)) {
+      if (row.item?.images?.large) urls.push(row.item.images.large);
+      if (row.item?.images?.small) urls.push(row.item.images.small);
+    }
+    if (!urls.length) record(card.id, provider, 'no-confident-energy-match', `${info.english} #${number}`);
+    return [...new Set(urls)];
   }
 
   async function pokemonTcgImages(card) {
@@ -314,11 +428,20 @@
       list.unshift({ url: cached.url, source: cached.source || 'cache' });
     }
 
+    // Algumas coleções especiais (como SVE/MEE) possuem os arquivos no CDN,
+    // mas o endpoint de detalhes pode não devolver o campo image.
+    for (const url of directTcgdexAssetCandidates(card)) {
+      list.push({ url, source: 'tcgdex-cdn-direto' });
+    }
+
     for (const language of ['pt-br', 'pt', 'en']) {
       const urls = await tcgdexImages(card, language);
       for (const url of urls) list.push({ url, source: `tcgdex-${language}` });
       if (urls.length) break;
     }
+
+    const energyUrls = await pokemonTcgEnergyImages(card);
+    for (const url of energyUrls) list.push({ url, source: 'pokemontcg-energy-api' });
 
     const pokemonUrls = await pokemonTcgImages(card);
     for (const url of pokemonUrls) list.push({ url, source: 'pokemontcg-api' });
