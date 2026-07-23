@@ -16,11 +16,12 @@ const PRICE_CACHE_KEY = 'fichario-pokemon-price-cache-v1';
 const FX_CACHE_KEY = 'fichario-pokemon-fx-cache-v1';
 const LIGA_SET_CACHE_KEY = 'fichario-pokemon-liga-set-cache-v1';
 const PRICE_LOGIC_VERSION_KEY = 'fichario-pokemon-price-logic-version';
-const PRICE_LOGIC_VERSION = 9;
+const PRICE_LOGIC_VERSION = 12;
 const PRICE_CACHE_TTL = 24 * 60 * 60 * 1000;
 const FX_CACHE_TTL = 24 * 60 * 60 * 1000;
-const TCGDEX_API_BASE = 'https://api.tcgdex.net/v2/pt';
+const TCGDEX_API_BASE = 'https://api.tcgdex.net/v2/pt-br';
 const TCGDEX_API_FALLBACK = 'https://api.tcgdex.net/v2/en';
+const TCGDEX_API_JAPANESE = 'https://api.tcgdex.net/v2/ja';
 const FX_API_BASE = 'https://api.frankfurter.dev/v2';
 const LIGA_POKEMON_BASES = ['https://www.ligapokemon.com.br/', 'https://ligapokemon.com.br/'];
 const TAB_ITEMS = [
@@ -133,9 +134,11 @@ function saveLigaSetCache() {
   saveStoredObject(LIGA_SET_CACHE_KEY, ligaSetCache);
 }
 
-function priceCacheFresh(cardId) {
+function priceCacheFresh(cardId, finish = 'comum') {
   const item = priceCache[cardId];
-  return Boolean(item && Number(item.logicVersion) === PRICE_LOGIC_VERSION && Number(item.fetchedAt) && Date.now() - Number(item.fetchedAt) < PRICE_CACHE_TTL);
+  const kind = finishKind(finish);
+  const quote = item?.quotes?.[kind];
+  return Boolean(item && Number(item.logicVersion) === PRICE_LOGIC_VERSION && quote && Number(quote.fetchedAt) && Date.now() - Number(quote.fetchedAt) < PRICE_CACHE_TTL);
 }
 
 function finishKind(finish) {
@@ -431,7 +434,7 @@ function tcgplayerAverageQuote(tcgplayer, kind, card, remoteIdentity) {
   if (!tcgplayer || !card || !remoteIdentity) return null;
   const metric = tcgplayerMetric(tcgplayer, kind);
   if (!metric) return null;
-  const validation = exactRemoteValidation(card, remoteIdentity, kind);
+  const validation = cardmarketValidation(card, remoteIdentity, kind);
   const finishLabel = kind === 'reverse' ? 'reversa' : kind === 'holo' ? 'holográfica/foil' : 'comum';
   return {
     value: metric.value,
@@ -491,37 +494,57 @@ function cardmarketIdentityFromDetail(detail) {
     image: String(detail?.image || ''),
     rarity: String(detail?.rarity || ''),
     illustrator: String(detail?.illustrator || ''),
+    promotional: Boolean(detail?.variants?.wPromo)
+      || /promo|black star/i.test(String(detail?.set?.name || ''))
+      || /(?:^|[-_.])p(?:$|[-_.])/i.test(String(detail?.set?.id || '')),
   };
+}
+
+function isPromotionalCard(card) {
+  return Boolean(card?.promotional)
+    || Boolean(card?.variants?.wPromo)
+    || /promo|black star/i.test(String(card?.setName || ''))
+    || /(?:^|[-_.])p(?:$|[-_.])/i.test(String(card?.setId || ''));
+}
+
+function enrichLocalCardFromRemote(card, remote) {
+  if (!card || !remote) return;
+  if (remote.illustrator) card.illustrator = remote.illustrator;
+  if (remote.category) card.category = remote.category;
+  if (remote.rarity) card.rarity = remote.rarity;
+  if (remote.variants && typeof remote.variants === 'object') card.variants = { ...remote.variants };
+  card.promotional = Boolean(remote.promotional);
+  if ((!Array.isArray(card.pokemonIds) || !card.pokemonIds.length) && Array.isArray(remote.dexId)) {
+    card.pokemonIds = [...remote.dexId];
+  }
 }
 
 function cardmarketValidation(card, remote, kind) {
   const checks = [];
   const add = (key, label, ok) => checks.push({ key, label, ok: Boolean(ok) });
+  enrichLocalCardFromRemote(card, remote);
+
   const localPokemon = sortedNumberList(card?.pokemonIds);
   const remotePokemon = sortedNumberList(remote?.dexId);
   const variants = remote?.variants || {};
 
-  add('id', 'identificador exato da carta', String(remote?.id || '') === String(card?.id || ''));
+  add('pokedex', 'número do Pokémon', !localPokemon.length || sameNumberList(localPokemon, remotePokemon));
+  add('number', 'número exato da carta', normalizeCollectorId(remote?.localId) === normalizeCollectorId(card?.localId));
   add('setId', 'coleção exata', String(remote?.setId || '') === String(card?.setId || ''));
   add('setName', 'nome da coleção', normalize(remote?.setName) === normalize(card?.setName));
-  add('number', 'número de colecionador', normalizeCollectorId(remote?.localId) === normalizeCollectorId(card?.localId));
-  add('name', 'nome exato da carta', normalize(remote?.name) === normalize(card?.name));
-  if (localPokemon.length) add('pokedex', 'número da Pokédex', sameNumberList(localPokemon, remotePokemon));
-
-  const localImage = canonicalImageBase(card?.imageUrl);
-  const remoteImage = canonicalImageBase(remote?.image);
-  add('art', 'arte vinculada ao mesmo registro', Boolean(localImage && remoteImage && localImage === remoteImage));
+  add('illustrator', 'ilustrador', Boolean(remote?.illustrator) && normalize(remote?.illustrator) === normalize(card?.illustrator));
+  add('promo', 'status promocional', Boolean(remote?.promotional) === isPromotionalCard(card));
 
   let finishOk = false;
   let finishReason = 'acabamento disponível';
   if (kind === 'normal') {
     finishOk = variants.normal === true;
   } else if (kind === 'reverse') {
-    finishOk = variants.reverse === true && variants.holo !== true;
-    if (variants.reverse === true && variants.holo === true) finishReason = 'Cardmarket agrupa reversa e holográfica no mesmo preço foil';
+    finishOk = variants.reverse === true;
+    if (variants.reverse === true && variants.holo === true) finishReason = 'Cardmarket usa o mesmo preço foil para reversa e holográfica';
   } else if (kind === 'holo') {
-    finishOk = variants.holo === true && variants.reverse !== true;
-    if (variants.holo === true && variants.reverse === true) finishReason = 'Cardmarket agrupa holográfica e reversa no mesmo preço foil';
+    finishOk = variants.holo === true;
+    if (variants.holo === true && variants.reverse === true) finishReason = 'Cardmarket usa o mesmo preço foil para holográfica e reversa';
   }
   add('finish', finishReason, finishOk);
 
@@ -536,34 +559,36 @@ function cardmarketValidation(card, remote, kind) {
 
 function cardmarketMetric(cardmarket, kind) {
   const holo = kind === 'holo' || kind === 'reverse';
-  const candidates = holo ? [
-    ['avg-holo', 'média de vendas foil'],
-    ['avg7-holo', 'média foil de 7 dias'],
-    ['trend-holo', 'tendência foil'],
-    ['avg30-holo', 'média foil de 30 dias'],
-    ['avg1-holo', 'média foil de 24 horas'],
-    ['low-holo', 'menor oferta foil'],
-  ] : [
-    ['avg', 'média de vendas'],
-    ['avg7', 'média de 7 dias'],
-    ['trend', 'preço de tendência'],
-    ['avg30', 'média de 30 dias'],
-    ['avg1', 'média de 24 horas'],
-    ['low', 'menor oferta'],
-  ];
+  const candidates = holo
+    ? [
+        ['trend-holo', 'tendência foil'],
+        ['avg30-holo', 'média foil de 30 dias'],
+        ['avg7-holo', 'média foil de 7 dias'],
+        ['avg1-holo', 'média foil de 24 horas'],
+        ['avg-holo', 'média histórica foil'],
+        ['low-holo', 'menor oferta foil'],
+      ]
+    : [
+        ['trend', 'tendência'],
+        ['avg30', 'média de 30 dias'],
+        ['avg7', 'média de 7 dias'],
+        ['avg1', 'média de 24 horas'],
+        ['avg', 'média histórica'],
+        ['low', 'menor oferta'],
+      ];
   for (const [field, label] of candidates) {
-    if (hasFiniteNumber(cardmarket?.[field]) && Number(cardmarket[field]) >= 0) {
+    if (hasFiniteNumber(cardmarket?.[field]) && Number(cardmarket[field]) > 0) {
       return { field, label, value: Number(cardmarket[field]) };
     }
   }
   return null;
 }
 
-function cardmarketAverageQuote(cardmarket, kind, card, remoteIdentity) {
+function cardmarketTrendQuote(cardmarket, kind, card, remoteIdentity) {
   if (!cardmarket || typeof cardmarket !== 'object' || !card || !remoteIdentity) return null;
   const metric = cardmarketMetric(cardmarket, kind);
   if (!metric) return null;
-  const validation = exactRemoteValidation(card, remoteIdentity, kind);
+  const validation = cardmarketValidation(card, remoteIdentity, kind);
   const finishLabel = kind === 'reverse' ? 'reversa' : kind === 'holo' ? 'holográfica/foil' : 'comum';
   const fingerprint = [
     card.id, kind, metric.field, metric.value, cardmarket.unit || 'EUR', cardmarket.updated || '',
@@ -572,7 +597,7 @@ function cardmarketAverageQuote(cardmarket, kind, card, remoteIdentity) {
   return {
     value: metric.value,
     currency: cardmarket.unit || 'EUR',
-    label: `Cardmarket ${metric.label} · ${finishLabel}`,
+    label: `Cardmarket · ${metric.label} · ${finishLabel}`,
     source: 'cardmarket',
     provider: 'Cardmarket via TCGdex',
     updated: cardmarket.updated || null,
@@ -581,6 +606,30 @@ function cardmarketAverageQuote(cardmarket, kind, card, remoteIdentity) {
     validation,
     fingerprint,
     metric: metric.field,
+  };
+}
+
+
+async function fetchBestMarketPricing(cardId, finish = 'comum') {
+  const card = cardMap.get(cardId);
+  if (!card) throw new Error('Carta não encontrada no catálogo local.');
+  const pricing = await fetchTcgDexPricing(cardId);
+  const kind = finishKind(finish);
+
+  let quote = cardmarketTrendQuote(pricing.cardmarket, kind, card, pricing.identity);
+  if (!quote) quote = tcgplayerAverageQuote(pricing.tcgplayer, kind, card, pricing.identity);
+  if (!quote) {
+    throw new Error(`Nenhum dado público de mercado para ${card.name} (${card.setName || card.setId} ${card.localId}).`);
+  }
+
+  await ensureFxRates([quote.currency || 'EUR'], false);
+  const converted = quoteInBrl(quote, pricing.fetchedAt);
+  if (!converted) throw new Error(`Cotação ${quote.currency || 'EUR'}/BRL indisponível.`);
+  return {
+    ...converted,
+    detail: pricing.detail,
+    identity: pricing.identity,
+    locale: pricing.locale,
   };
 }
 
@@ -593,47 +642,16 @@ function fxRate(currency) {
 function automaticPriceQuote(cardId, finish = 'comum') {
   const cached = priceCache[cardId];
   const card = cardMap.get(cardId);
-  if (!cached || !card) return null;
   const kind = finishKind(finish);
-
-  const ligaQuote = ligaPokemonAverageQuote(cached.ligaPokemon, kind);
-  if (ligaQuote) {
-    return {
-      ...ligaQuote,
-      brl: ligaQuote.value,
-      rate: 1,
-      fetchedAt: cached.fetchedAt || null,
-      confidence: 'verified', verified: true, usable: true,
-      fingerprint: [card.id, card.setId, card.localId, kind, ligaQuote.value, 'liga'].join('|'),
-      validation: { reasons: [], checks: [
-        { key: 'local-id', label: 'identificação pelo catálogo local', ok: true },
-        { key: 'set', label: 'coleção exata', ok: true },
-        { key: 'number', label: 'número de colecionador exato', ok: true },
-      ] },
-    };
-  }
-
-  const remote = cached.tcgDexIdentity;
-  const cm = quoteInBrl(cardmarketAverageQuote(cached.cardmarket, kind, card, remote), cached.fetchedAt);
-  const tp = quoteInBrl(tcgplayerAverageQuote(cached.tcgplayer, kind, card, remote), cached.fetchedAt);
-  const verified = [cm, tp].filter(item => item?.verified && hasFiniteNumber(item.brl));
-  if (verified.length >= 2) {
-    const brl = Math.round((verified.reduce((sum, item) => sum + Number(item.brl), 0) / verified.length) * 100) / 100;
-    return {
-      brl,
-      value: brl,
-      currency: 'BRL',
-      rate: 1,
-      label: `Média internacional · ${verified.map(item => item.source === 'cardmarket' ? 'Cardmarket' : 'TCGplayer').join(' + ')}`,
-      source: 'multifonte',
-      provider: 'TCGdex · múltiplos mercados',
-      fetchedAt: cached.fetchedAt || null,
-      confidence: 'verified', verified: true, usable: true,
-      fingerprint: [card.id, kind, ...verified.map(item => item.fingerprint)].join('|'),
-      validation: { reasons: [], checks: verified.flatMap(item => item.validation?.checks || []) },
-    };
-  }
-  return verified[0] || cm || tp || null;
+  const quote = cached?.quotes?.[kind];
+  if (!quote || !card || !hasFiniteNumber(quote.brl)) return null;
+  return {
+    ...quote,
+    label: quote.label || 'Cardmarket · tendência',
+    source: 'cardmarket',
+    provider: 'Cardmarket via TCGdex',
+    fingerprint: quote.fingerprint || [card.id, card.setId, card.localId, kind, quote.brl, 'cardmarket-trend'].join('|'),
+  };
 }
 
 function legacyPriceQuote(cardId) {
@@ -649,9 +667,9 @@ function storedAutomaticPriceQuote(variant) {
     && variant.automaticPriceFingerprint === variant.automaticPriceAcceptedFingerprint;
   return {
     brl: Number(variant.automaticEstimatedValue),
-    label: variant.automaticPriceLabel || 'Liga Pokémon',
-    source: variant.automaticPriceSource || 'ligapokemon',
-    provider: variant.automaticPriceProvider || 'Marketplace Liga Pokémon',
+    label: variant.automaticPriceLabel || 'Cardmarket · tendência',
+    source: variant.automaticPriceSource || 'cardmarket',
+    provider: variant.automaticPriceProvider || 'Cardmarket via TCGdex',
     value: nullableNumber(variant.automaticPriceOriginalValue),
     currency: variant.automaticPriceCurrency || 'BRL',
     fetchedAt: variant.automaticPriceUpdatedAt || null,
@@ -691,9 +709,9 @@ function applyAutomaticPriceToVariant(cardId, variant) {
     || JSON.stringify(variant.automaticPriceValidationReasons || []) !== JSON.stringify(nextReasons)
     || JSON.stringify(variant.automaticPriceValidationChecks || []) !== JSON.stringify(nextChecks);
   variant.automaticEstimatedValue = nextValue;
-  variant.automaticPriceSource = quote.source || 'ligapokemon';
-  variant.automaticPriceLabel = quote.label || 'Liga Pokémon';
-  variant.automaticPriceProvider = quote.provider || 'Marketplace Liga Pokémon';
+  variant.automaticPriceSource = quote.source || 'cardmarket';
+  variant.automaticPriceLabel = quote.label || 'Cardmarket · tendência';
+  variant.automaticPriceProvider = quote.provider || 'Cardmarket via TCGdex';
   variant.automaticPriceOriginalValue = nullableNumber(quote.value);
   variant.automaticPriceCurrency = quote.currency || 'BRL';
   variant.automaticPriceUpdatedAt = nextUpdated;
@@ -763,37 +781,45 @@ async function loadFxRates(force = false) {
   return fxCache;
 }
 
-async function fetchCardPricing(cardId, force = false) {
-  if (!force && priceCacheFresh(cardId)) return priceCache[cardId];
-  if (priceRequests.has(cardId)) return priceRequests.get(cardId);
+async function ensureFxRates(currencies = ['EUR', 'USD'], force = false) {
+  const requested = Array.from(new Set((Array.isArray(currencies) ? currencies : [currencies])
+    .map(value => String(value || '').toUpperCase())
+    .filter(value => value && value !== 'BRL')));
+  if (!requested.length) return fxCache;
+  const stale = requested.some(currency => force || !fxCache[currency]
+    || !hasFiniteNumber(fxCache[currency].rate)
+    || Date.now() - Number(fxCache[currency].fetchedAt || 0) >= FX_CACHE_TTL);
+  if (stale) await loadFxRates(force);
+  const missing = requested.filter(currency => !hasFiniteNumber(fxCache[currency]?.rate));
+  if (missing.length) throw new Error(`Cotação indisponível: ${missing.join(', ')}.`);
+  return fxCache;
+}
+
+async function fetchCardPricing(cardId, force = false, finish = 'comum') {
+  const kind = finishKind(finish);
+  if (!force && priceCacheFresh(cardId, finish)) return priceCache[cardId];
+  const requestKey = `${cardId}|${kind}`;
+  if (priceRequests.has(requestKey)) return priceRequests.get(requestKey);
   const request = (async () => {
     const card = cardMap.get(cardId);
     if (!card) throw new Error('Carta não encontrada no catálogo local.');
-    try { await loadFxRates(false); } catch (_) {}
-    const [tcgResult, ligaResult] = await Promise.allSettled([
-      fetchTcgDexPricing(cardId),
-      fetchLigaPokemonPricing(cardId),
-    ]);
-    const tcg = tcgResult.status === 'fulfilled' ? tcgResult.value : null;
-    const ligaPokemon = ligaResult.status === 'fulfilled' ? ligaResult.value : null;
-    const errors = [];
-    if (tcgResult.status === 'rejected') errors.push(String(tcgResult.reason?.message || tcgResult.reason));
-    if (ligaResult.status === 'rejected') errors.push(String(ligaResult.reason?.message || ligaResult.reason));
-    if (!ligaPokemon && !tcg?.cardmarket && !tcg?.tcgplayer) throw new Error(errors.join(' | ') || 'Nenhuma fonte retornou preço.');
+    await ensureFxRates(['EUR', 'USD'], force);
+    const cardmarket = await fetchBestMarketPricing(cardId, finish);
+    cardmarket.kind = kind;
+    cardmarket.fetchedAt = Date.now();
+    const previous = priceCache[cardId] || {};
     priceCache[cardId] = {
+      ...previous,
       logicVersion: PRICE_LOGIC_VERSION,
       fetchedAt: Date.now(),
-      ligaPokemon,
-      cardmarket: tcg?.cardmarket || null,
-      tcgplayer: tcg?.tcgplayer || null,
-      tcgDexIdentity: tcg?.identity || null,
-      diagnostics: errors,
-      identity: { id: card.id, setId: card.setId, localId: card.localId, name: card.name },
+      quotes: { ...(previous.quotes || {}), [kind]: cardmarket },
+      diagnostics: cardmarket.validation?.reasons || [],
+      identity: cardmarket.identity || { id: card.id, setId: card.setId, localId: card.localId, name: card.name },
     };
     savePriceCache();
     return priceCache[cardId];
-  })().finally(() => priceRequests.delete(cardId));
-  priceRequests.set(cardId, request);
+  })().finally(() => priceRequests.delete(requestKey));
+  priceRequests.set(requestKey, request);
   return request;
 }
 
@@ -901,6 +927,7 @@ function rebuildCatalogIndexes() {
     .filter(item => item.normalized)
     .sort((a, b) => b.normalized.length - a.normalized.length);
   for (const card of cards) {
+    card.imageUrl = upgradeCardImageUrl(card.imageUrl);
     if (!Array.isArray(card.pokemonIds) || !card.pokemonIds.length) card.pokemonIds = inferPokemonIds(card.name);
   }
   cardMap = new Map(cards.map(card => [card.id, card]));
@@ -956,7 +983,7 @@ async function init() {
     // Apenas caches produzidos pela lógica atual podem ser persistidos.
     let migratedCachedPrices = false;
     for (const cardId of Object.keys(state.entries)) {
-      if (priceCacheFresh(cardId)) migratedCachedPrices = persistAutomaticPricesForCard(cardId, false) || migratedCachedPrices;
+      if (variantsFor(cardId).some(variant => priceCacheFresh(cardId, variant.finish || 'comum'))) migratedCachedPrices = persistAutomaticPricesForCard(cardId, false) || migratedCachedPrices;
     }
     if (migratedCachedPrices) saveState();
     renderTabs();
@@ -1334,13 +1361,13 @@ function pricingPanel() {
   const latest = latestPriceFetch();
   return `<section class="price-update-card">
     <div class="catalog-update-heading">
-      <div><strong>Preços brasileiros</strong><span>${counts.priced} de ${counts.owned} cartas próprias com valor aceito${counts.pending ? ` · ${counts.pending} aguardando validação` : ''}${latest ? ` · última consulta ${esc(formatPriceDate(latest))}` : ''}</span></div>
-      <span class="online-badge">Liga + Cardmarket + TCGplayer</span>
+      <div><strong>Preços de mercado</strong><span>${counts.priced} de ${counts.owned} cartas próprias com valor aceito${counts.pending ? ` · ${counts.pending} aguardando validação` : ''}${latest ? ` · última consulta ${esc(formatPriceDate(latest))}` : ''}</span></div>
+      <span class="online-badge">Cardmarket + TCGplayer</span>
     </div>
-    <p>Prioridade: valor manual → Liga Pokémon → média Cardmarket/TCGplayer via TCGdex. A identificação usa coleção e número exatos do catálogo local.</p>
+    <p>Prioridade: valor manual → Cardmarket Trend → médias de 30/7/1 dia → média/menor oferta → TCGplayer. A identificação valida Pokémon, número, coleção, ilustrador, acabamento e status promocional.</p>
     ${priceUpdating ? `<div class="catalog-progress"><div class="progress"><span style="width:${progress}%"></span></div><small>${esc(priceUpdateMessage || 'Consultando preços...')}</small></div>` : ''}
-    <button class="primary-btn" ${priceUpdating ? 'disabled' : ''} onclick="startOwnedPriceUpdate()">${priceUpdating ? 'Atualizando...' : 'Atualizar preços da coleção'}</button>
-    ${priceUpdateFailures ? `<div class="catalog-last-result">${priceUpdateFailures} carta(s) não retornaram preço em nenhuma fonte nesta tentativa.</div>` : ''}
+    <button class="primary-btn" ${priceUpdating ? 'disabled' : ''} onclick="startOwnedPriceUpdate()">${priceUpdating ? 'Atualizando...' : 'Atualizar preços da coleção (busca completa)'}</button>
+    ${priceUpdateFailures ? `<div class="catalog-last-result">${priceUpdateFailures} carta(s) continuam sem dados públicos de mercado nesta tentativa.</div>` : ''}
   </section>`;
 }
 
@@ -1353,59 +1380,70 @@ function setPriceUpdateProgress(message, current, total) {
 
 async function startOwnedPriceUpdate() {
   if (priceUpdating) return;
-  const ownedIds = Object.keys(state.entries).filter(cardId => quantityFor(cardId) > 0 && cardMap.has(cardId));
-  if (!ownedIds.length) return notify('Nenhuma carta cadastrada para atualizar.');
+  const targets = [];
+  const seen = new Set();
+  for (const cardId of Object.keys(state.entries)) {
+    if (quantityFor(cardId) <= 0 || !cardMap.has(cardId)) continue;
+    const variants = variantsFor(cardId).length ? variantsFor(cardId) : [defaultVariant(0)];
+    for (const variant of variants) {
+      const finish = variant.finish || 'comum';
+      const key = `${cardId}|${finishKind(finish)}`;
+      if (!seen.has(key)) { seen.add(key); targets.push({ cardId, finish }); }
+    }
+  }
+  if (!targets.length) return notify('Nenhuma carta cadastrada para atualizar.');
   priceUpdating = true;
   priceUpdateFailures = 0;
-  setPriceUpdateProgress('Atualizando cotações para reais...', 0, ownedIds.length);
-  try { await loadFxRates(false); } catch (_) {}
+  setPriceUpdateProgress('Pesquisando preços em todas as referências disponíveis...', 0, targets.length);
+  try { await ensureFxRates(['EUR', 'USD'], false); } catch (_) {}
 
-  // Migra imediatamente os preços já consultados no Checkpoint 4 para dentro das cartas.
-  let restoredFromCache = 0;
-  for (const cardId of ownedIds) {
-    if (priceCache[cardId] && persistAutomaticPricesForCard(cardId, false)) restoredFromCache++;
-  }
-  if (restoredFromCache) saveState();
-
-  const targets = ownedIds.filter(cardId => !priceCacheFresh(cardId));
-  if (!targets.length) {
+  const pendingTargets = targets.filter(item => !priceCacheFresh(item.cardId, item.finish));
+  if (!pendingTargets.length) {
+    let saved = 0;
+    for (const cardId of new Set(targets.map(item => item.cardId))) if (persistAutomaticPricesForCard(cardId, false)) saved++;
+    if (saved) saveState();
     priceUpdating = false;
     priceUpdateMessage = '';
     renderKeepingScroll();
-    notify(restoredFromCache
-      ? `${restoredFromCache} preço(s) foram salvos nas cartas.`
-      : 'Os preços já foram consultados e estão salvos nas cartas.');
+    notify('Os preços de mercado já estão atualizados.');
     return;
   }
 
-  priceUpdateTotal = targets.length;
+  priceUpdateTotal = pendingTargets.length;
   let cursor = 0;
   let completed = 0;
-  let savedCards = restoredFromCache;
+  const touchedCards = new Set();
   const worker = async () => {
-    while (cursor < targets.length) {
+    while (cursor < pendingTargets.length) {
       const index = cursor++;
-      const cardId = targets[index];
+      const { cardId, finish } = pendingTargets[index];
       const card = cardMap.get(cardId);
-      setPriceUpdateProgress(`Consultando ${card?.name || cardId}...`, completed, targets.length);
-      try {
-        await fetchCardPricing(cardId, true);
-        if (persistAutomaticPricesForCard(cardId, false)) savedCards++;
-      } catch (_) {
-        priceUpdateFailures++;
+      setPriceUpdateProgress(`Mercados: ${card?.name || cardId} (${finish})...`, completed, pendingTargets.length);
+      let updated = false;
+      for (let attempt = 1; attempt <= 3 && !updated; attempt++) {
+        try {
+          await fetchCardPricing(cardId, true, finish);
+          touchedCards.add(cardId);
+          updated = true;
+        } catch (error) {
+          lastPriceDiagnostic = String(error?.message || error || 'Falha desconhecida');
+          if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 1200 * attempt));
+        }
       }
+      if (!updated) priceUpdateFailures++;
       completed++;
-      await new Promise(resolve => setTimeout(resolve, 350));
-      if (completed % 10 === 0 || completed === targets.length) saveState();
-      setPriceUpdateProgress(`Preços salvos: ${completed} de ${targets.length}`, completed, targets.length);
+      await new Promise(resolve => setTimeout(resolve, 900));
+      setPriceUpdateProgress(`Consultas: ${completed} de ${pendingTargets.length}`, completed, pendingTargets.length);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(2, targets.length) }, () => worker()));
+  await worker();
+  let savedCards = 0;
+  for (const cardId of touchedCards) if (persistAutomaticPricesForCard(cardId, false)) savedCards++;
   saveState();
   priceUpdating = false;
   priceUpdateMessage = '';
   renderKeepingScroll();
-  notify(`Preços consultados: ${targets.length - priceUpdateFailures} · salvos nas cartas: ${savedCards}${priceUpdateFailures ? ` · ${priceUpdateFailures} falha(s)` : ''}.`);
+  notify(`Mercados: ${pendingTargets.length - priceUpdateFailures} preço(s) encontrado(s) · ${priceUpdateFailures} sem dados públicos.`);
 }
 
 function renderDashboard() {
@@ -1478,7 +1516,7 @@ function catalogUpdatePanel() {
   return `<section class="catalog-update-card">
     <div class="catalog-update-heading">
       <div><strong>Atualização das coleções</strong><span>${esc(lastResult)}</span></div>
-      <span class="online-badge">TCGdex PT-BR</span>
+      <span class="online-badge">TCGdex completo JA + EN + PT-BR</span>
     </div>
     <p>Verifica novas expansões e cartas sem apagar quantidades, variantes, observações ou outros dados da sua coleção.</p>
     ${catalogUpdating ? `<div class="catalog-progress"><div class="progress"><span style="width:${progress}%"></span></div><small>${esc(catalogUpdateMessage || 'Preparando atualização...')}</small></div>` : ''}
@@ -1531,8 +1569,21 @@ function setNeedsCatalogRefresh(local, remote) {
 function cardImageUrl(value) {
   const source = String(value || '').trim();
   if (!source) return null;
+  if (/assets\.tcgdex\.net/i.test(source)) {
+    const root = source.replace(/\/(?:low|high)\.(?:webp|png|jpe?g)(\?.*)?$/i, '').replace(/\/$/, '');
+    return `${root}/high.webp`;
+  }
   if (/\.(webp|png|jpe?g)(\?.*)?$/i.test(source)) return source;
-  return `${source.replace(/\/$/, '')}/low.webp`;
+  return `${source.replace(/\/$/, '')}/high.webp`;
+}
+
+function upgradeCardImageUrl(value) {
+  const source = String(value || '').trim();
+  if (!source) return null;
+  if (!/assets\.tcgdex\.net/i.test(source)) return source;
+  return source
+    .replace(/\/low\.webp(\?.*)?$/i, '/high.webp$1')
+    .replace(/\/low\.png(\?.*)?$/i, '/high.png$1');
 }
 
 function normalizeRemoteSet(detail, fallback) {
@@ -1563,107 +1614,144 @@ function normalizeRemoteCard(remote, set) {
     number: official ? `${localId}/${official}` : localId,
     rarity: remote?.rarity || null,
     imageUrl: cardImageUrl(remote?.image),
-    pokemonIds: inferPokemonIds(remote?.name),
+    pokemonIds: Array.isArray(remote?.dexId) && remote.dexId.length ? remote.dexId : inferPokemonIds(remote?.name),
+    illustrator: remote?.illustrator || null,
+    category: remote?.category || null,
+    variants: remote?.variants && typeof remote.variants === 'object' ? remote.variants : null,
+    promotional: Boolean(remote?.variants?.wPromo)
+      || /promo|black star/i.test(String(set.name || ''))
+      || /(?:^|[-_.])p(?:$|[-_.])/i.test(String(set.id || '')),
   };
+}
+
+function inferSetIdFromRemoteCard(remote) {
+  const explicit = String(remote?.set?.id || remote?.setId || '').trim();
+  if (explicit) return explicit;
+  const id = String(remote?.id || '').trim();
+  const localId = String(remote?.localId || '').trim();
+  if (id && localId && id.endsWith(`-${localId}`)) return id.slice(0, -(localId.length + 1));
+  const split = id.lastIndexOf('-');
+  return split > 0 ? id.slice(0, split) : '';
+}
+
+async function fetchCatalogLocale(base, localeLabel) {
+  // A listagem direta /cards evita perder cartas quando uma consulta individual
+  // de coleção falha. É também muito mais rápida do que abrir todos os sets.
+  const [remoteSets, remoteCards] = await Promise.all([
+    fetchJsonWithTimeout(`${base}/sets`, 60000),
+    fetchJsonWithTimeout(`${base}/cards`, 90000),
+  ]);
+  if (!Array.isArray(remoteSets)) throw new Error(`${localeLabel}: lista de coleções inválida.`);
+  if (!Array.isArray(remoteCards)) throw new Error(`${localeLabel}: lista de cartas inválida.`);
+
+  const sets = new Map();
+  for (const remote of remoteSets) {
+    if (!remote?.id) continue;
+    const set = normalizeRemoteSet(remote, remote);
+    if (set.id) sets.set(set.id, set);
+  }
+
+  const cards = new Map();
+  for (let index = 0; index < remoteCards.length; index++) {
+    const remote = remoteCards[index];
+    if (!remote?.id) continue;
+    if (index % 500 === 0) {
+      setCatalogUpdateProgress(`${localeLabel}: importando ${index.toLocaleString('pt-BR')} de ${remoteCards.length.toLocaleString('pt-BR')} cartas...`, index, remoteCards.length);
+    }
+    const setId = inferSetIdFromRemoteCard(remote);
+    let set = sets.get(setId);
+    if (!set) {
+      const brief = remote?.set || {};
+      set = {
+        id: setId || String(brief.id || 'sem-colecao'),
+        name: String(brief.name || setId || 'Coleção não identificada'),
+        officialCardCount: Number(brief?.cardCount?.official) || 0,
+        totalCardCount: Number(brief?.cardCount?.total) || 0,
+        logoUrl: brief.logo || null,
+        symbolUrl: brief.symbol || null,
+      };
+      sets.set(set.id, set);
+    }
+    const normalized = normalizeRemoteCard(remote, set);
+    if (normalized.id) cards.set(normalized.id, normalized);
+  }
+  setCatalogUpdateProgress(`${localeLabel}: ${cards.size.toLocaleString('pt-BR')} cartas encontradas.`, remoteCards.length, remoteCards.length, true);
+  return { sets, cards, failures: 0, listedCards: remoteCards.length };
 }
 
 async function startCatalogUpdate() {
   if (catalogUpdating) return;
   catalogUpdating = true;
-  setCatalogUpdateProgress('Conectando ao catálogo TCGdex...', 0, 1, true);
+  setCatalogUpdateProgress('Baixando o catálogo completo TCGdex EN, PT-BR e japonês...', 0, 1, true);
 
   try {
-    const remoteSets = await fetchJsonWithTimeout(`${TCGDEX_API_BASE}/sets`);
-    if (!Array.isArray(remoteSets)) throw new Error('O servidor retornou uma lista inválida.');
+    const localSets = new Map((catalog.sets || []).map(item => [item.id, { ...item }]));
+    const localCards = new Map((catalog.cards || []).map(item => [item.id, { ...item }]));
+    const oldCardCount = localCards.size;
+    const oldSetCount = localSets.size;
 
-    const localSetMap = new Map((catalog.sets || []).map(item => [item.id, item]));
-    const setMap = new Map((catalog.sets || []).map(item => [item.id, { ...item }]));
-    const cardMapForUpdate = new Map((catalog.cards || []).map(item => [item.id, { ...item }]));
-    const changed = remoteSets.filter(remote => remote?.id && setNeedsCatalogRefresh(localSetMap.get(remote.id), remote));
-    const setsAdded = changed.filter(remote => !localSetMap.has(remote.id)).length;
-    const oldCardCount = cardMapForUpdate.size;
-    let setsUpdated = 0;
-    let failures = 0;
+    let ptResult = { sets: new Map(), cards: new Map(), failures: 0 };
+    let enResult = { sets: new Map(), cards: new Map(), failures: 0 };
+    let jaResult = { sets: new Map(), cards: new Map(), failures: 0 };
+    try { jaResult = await fetchCatalogLocale(TCGDEX_API_JAPANESE, 'Japonês'); } catch (_) {}
+    try { enResult = await fetchCatalogLocale(TCGDEX_API_FALLBACK, 'Inglês'); } catch (_) {}
+    try { ptResult = await fetchCatalogLocale(TCGDEX_API_BASE, 'Português'); } catch (_) {}
+    if (!ptResult.cards.size && !enResult.cards.size && !jaResult.cards.size) throw new Error('Nenhum dos catálogos online respondeu.');
 
-    if (!changed.length) {
-      const result = {
-        updatedAt: Date.now(), setsAdded: 0, setsUpdated: 0, cardsAdded: 0,
-        setsTotal: setMap.size, cardsTotal: cardMapForUpdate.size,
-      };
-      saveCatalogUpdateMeta(result);
-      catalogUpdating = false;
-      catalogUpdateMessage = '';
-      renderKeepingScroll();
-      notify('O catálogo já está atualizado.');
-      return;
+    // Japonês inclui impressões regionais; inglês amplia a cobertura internacional;
+    // português sobrescreve nomes e imagens quando disponível.
+    for (const [id, set] of jaResult.sets) localSets.set(id, { ...(localSets.get(id) || {}), ...set });
+    for (const [id, card] of jaResult.cards) localCards.set(id, { ...(localCards.get(id) || {}), ...card, catalogLocale: 'ja' });
+    for (const [id, set] of enResult.sets) localSets.set(id, { ...(localSets.get(id) || {}), ...set });
+    for (const [id, card] of enResult.cards) localCards.set(id, { ...(localCards.get(id) || {}), ...card, catalogLocale: 'en' });
+    for (const [id, set] of ptResult.sets) localSets.set(id, { ...(localSets.get(id) || {}), ...set });
+    for (const [id, card] of ptResult.cards) {
+      const existing = localCards.get(id) || {};
+      localCards.set(id, {
+        ...existing,
+        ...card,
+        imageUrl: card.imageUrl || existing.imageUrl || null,
+        illustrator: card.illustrator || existing.illustrator || null,
+        variants: card.variants || existing.variants || null,
+        pokemonIds: card.pokemonIds?.length ? card.pokemonIds : (existing.pokemonIds || []),
+        catalogLocale: 'pt-br',
+      });
     }
-
-    catalogUpdateTotal = changed.length;
-    for (let index = 0; index < changed.length; index++) {
-      const remote = changed[index];
-      setCatalogUpdateProgress(`Baixando ${remote.name || remote.id}...`, index, changed.length);
-      try {
-        const detail = await fetchJsonWithTimeout(`${TCGDEX_API_BASE}/sets/${encodeURIComponent(remote.id)}`);
-        const set = normalizeRemoteSet(detail, remote);
-        if (!set.id) throw new Error('Coleção sem identificador.');
-        setMap.set(set.id, set);
-        const remoteCards = Array.isArray(detail?.cards) ? detail.cards : [];
-        for (const remoteCard of remoteCards) {
-          const normalized = normalizeRemoteCard(remoteCard, set);
-          if (!normalized.id) continue;
-          const existing = cardMapForUpdate.get(normalized.id) || {};
-          cardMapForUpdate.set(normalized.id, {
-            ...existing,
-            ...normalized,
-            rarity: normalized.rarity || existing.rarity || null,
-            imageUrl: normalized.imageUrl || existing.imageUrl || null,
-            pokemonIds: normalized.pokemonIds?.length ? normalized.pokemonIds : (existing.pokemonIds || []),
-          });
-        }
-        setsUpdated++;
-      } catch (_) {
-        failures++;
-      }
-      setCatalogUpdateProgress(`Processando ${remote.name || remote.id}...`, index + 1, changed.length);
-    }
-
-    if (!setsUpdated && failures) throw new Error('Não foi possível baixar as coleções alteradas.');
 
     const updatedCatalog = {
       version: new Date().toISOString(),
-      source: 'TCGdex PT-BR + catálogo local',
-      sets: [...setMap.values()],
-      cards: [...cardMapForUpdate.values()],
+      source: 'TCGdex completo JA + EN + PT-BR + catálogo local',
+      sets: [...localSets.values()],
+      cards: [...localCards.values()],
     };
-    setCatalogUpdateProgress('Salvando o catálogo para uso offline...', changed.length, changed.length, true);
+    setCatalogUpdateProgress('Salvando catálogo ampliado para uso offline...', 1, 1, true);
     await saveUpdatedCatalog(updatedCatalog);
     catalog = updatedCatalog;
     rebuildCatalogIndexes();
 
     const result = {
       updatedAt: Date.now(),
-      setsAdded,
-      setsUpdated,
-      cardsAdded: Math.max(0, cardMapForUpdate.size - oldCardCount),
-      setsTotal: setMap.size,
-      cardsTotal: cardMapForUpdate.size,
-      failures,
+      setsAdded: Math.max(0, localSets.size - oldSetCount),
+      setsUpdated: localSets.size,
+      cardsAdded: Math.max(0, localCards.size - oldCardCount),
+      setsTotal: localSets.size,
+      cardsTotal: localCards.size,
+      failures: ptResult.failures + enResult.failures + jaResult.failures,
+      enListedCards: enResult.listedCards || enResult.cards.size,
+      ptListedCards: ptResult.listedCards || ptResult.cards.size,
+      jaListedCards: jaResult.listedCards || jaResult.cards.size,
     };
     saveCatalogUpdateMeta(result);
     ui.cardLimit = 80;
     catalogUpdating = false;
     catalogUpdateMessage = '';
     render();
-    const warning = failures ? ` (${failures} coleção(ões) não responderam)` : '';
-    notify(`Coleções atualizadas: +${result.setsAdded} coleções e +${result.cardsAdded} cartas${warning}.`);
+    notify(`Catálogo completo: ${result.cardsTotal.toLocaleString('pt-BR')} impressões únicas (+${result.cardsAdded.toLocaleString('pt-BR')}).`);
   } catch (error) {
     catalogUpdating = false;
     catalogUpdateMessage = '';
     renderKeepingScroll();
-    const message = error?.name === 'AbortError'
-      ? 'A conexão demorou demais. Tente novamente.'
-      : `Não foi possível atualizar: ${error?.message || 'erro de conexão'}`;
-    notify(message);
+    notify(`Não foi possível atualizar: ${error?.message || 'erro de conexão'}`);
   }
 }
 
@@ -1882,16 +1970,16 @@ function automaticPriceBox(cardId, finish = 'comum', variantId = '') {
     return `<div class="automatic-price-card ${verified ? 'verified-price' : 'review-price'}">
       <strong>${esc(converted)}</strong>
       <span>${esc(source)}${original ? ` · ${esc(original)}` : ''}</span>
-      <small>${displayQuote.stored ? 'Valor salvo na carta' : 'Consulta multifonte'} ${esc(formatPriceDate(displayQuote.fetchedAt))}${displayQuote.rate != null ? ` · câmbio ${displayQuote.currency}/BRL ${Number(displayQuote.rate).toLocaleString('pt-BR', { maximumFractionDigits: 4 })}` : ''}</small>
+      <small>${displayQuote.stored ? 'Valor salvo na carta' : 'Consulta Cardmarket'} ${esc(formatPriceDate(displayQuote.fetchedAt))}${displayQuote.rate != null ? ` · câmbio ${displayQuote.currency}/BRL ${Number(displayQuote.rate).toLocaleString('pt-BR', { maximumFractionDigits: 4 })}` : ''}</small>
       ${statusHtml}
       ${validationButton}
       <button type="button" class="price-refresh-btn" ${loading ? 'disabled' : ''} onclick="event.preventDefault();event.stopPropagation();updateCardPrice('${esc(cardId)}', document.getElementById('regFinish')?.value || '${esc(finish)}', true)">${loading ? 'Consultando...' : 'Atualizar agora'}</button>
     </div>`;
   }
-  if (loading) return `<div class="automatic-price-card loading-price"><strong>Consultando Liga, Cardmarket e TCGplayer...</strong><span>Aguarde alguns segundos.</span></div>`;
+  if (loading) return `<div class="automatic-price-card loading-price"><strong>Consultando preços de mercado...</strong><span>Aguarde alguns segundos.</span></div>`;
   return `<div class="automatic-price-card empty-price">
-    <strong>Ainda sem preço nas fontes disponíveis</strong>
-    <span>Ordem: valor manual → Liga → Cardmarket/TCGplayer.</span>
+    <strong>Sem preço público disponível</strong>
+    <span>Busca: Cardmarket Trend e médias → TCGplayer → último preço salvo.</span>
     <button type="button" class="price-refresh-btn" onclick="event.preventDefault();event.stopPropagation();updateCardPrice('${esc(cardId)}', document.getElementById('regFinish')?.value || '${esc(finish)}', true)">Consultar preço</button>
   </div>`;
 }
@@ -1920,16 +2008,16 @@ function confirmCardmarketPrice(cardId, variantId, finish) {
 async function updateCardPrice(cardId, finish = 'comum', force = false) {
   refreshAutomaticPriceField(cardId, finish);
   try {
-    await fetchCardPricing(cardId, force);
+    await fetchCardPricing(cardId, force, finish);
     const saved = persistAutomaticPricesForCard(cardId, true);
     refreshAutomaticPriceField(cardId, finish);
     renderKeepingScroll();
     const quote = automaticPriceQuote(cardId, finish);
     notify(quote
       ? (quote.confidence === 'verified'
-        ? (saved ? 'Preço multifonte salvo' : 'Preço multifonte encontrado')
-        : 'Preço encontrado em fonte externa')
-      : 'Nenhuma fonte retornou preço para esta carta.');
+        ? (saved ? 'Preço de mercado salvo' : 'Preço de mercado encontrado')
+        : 'Preço de mercado encontrado para revisão')
+      : 'Nenhum mercado retornou preço para esta carta.');
   } catch (error) {
     refreshAutomaticPriceField(cardId, finish);
     const message = error?.name === 'AbortError' ? 'A consulta demorou demais.' : String(error?.message || 'Não foi possível consultar o preço agora.');
@@ -1940,11 +2028,11 @@ async function updateCardPrice(cardId, finish = 'comum', force = false) {
 }
 
 function ensureCardPriceLoaded(cardId, finish) {
-  if (priceCacheFresh(cardId)) {
+  if (priceCacheFresh(cardId, finish)) {
     if (persistAutomaticPricesForCard(cardId, true)) renderKeepingScroll();
     return;
   }
-  if (priceRequests.has(cardId)) return;
+  if (priceRequests.has(`${cardId}|${finishKind(finish)}`)) return;
   setTimeout(() => updateCardPrice(cardId, finish, false), 120);
 }
 
@@ -1962,7 +2050,9 @@ function openCard(cardId, variantId = undefined) {
   showModal(`
     <button class="modal-close" onclick="closeModal()" aria-label="Fechar">×</button>
     <div class="registration-header">
-      ${card.imageUrl ? `<img class="registration-card-image" src="${esc(card.imageUrl)}" onerror="this.outerHTML='<div class=&quot;registration-placeholder&quot;>TCG</div>'">` : '<div class="registration-placeholder">TCG</div>'}
+      <div class="registration-image-frame" data-fichario-card-image="${esc(card.id)}">
+        ${card.imageUrl ? `<img class="registration-card-image" src="${esc(upgradeCardImageUrl(card.imageUrl))}" alt="Arte de ${esc(card.name)}">` : '<div class="registration-placeholder">TCG</div>'}
+      </div>
       <div>
         <span class="registration-kicker">CADASTRO DA CARTA</span>
         <h2>${esc(card.name)}</h2>
@@ -1987,7 +2077,7 @@ function openCard(cardId, variantId = undefined) {
       <h3>${existingId ? 'Editar variante' : 'Nova variante'}</h3>
       <input type="hidden" id="regVariantId" value="${esc(existingId)}">
       <div class="registration-grid two-columns">
-        ${registrationField('Quantidade', `<input id="regQuantity" class="field" type="number" inputmode="numeric" min="0" step="1" value="${Math.max(0, Number(draft.quantity) || 0)}">`)}
+        ${registrationField('Quantidade', `<div class="quantity-stepper"><button type="button" class="quantity-step-btn" onclick="changeRegistrationQuantity(-1)" aria-label="Diminuir quantidade">−</button><input id="regQuantity" class="field quantity-step-value" type="number" inputmode="numeric" min="0" step="1" value="${Math.max(0, Number(draft.quantity) || 0)}"><button type="button" class="quantity-step-btn" onclick="changeRegistrationQuantity(1)" aria-label="Aumentar quantidade">+</button></div>`)}
         ${registrationField('Condição', `<select id="regCondition" class="field">${['Mint','Near Mint','Excelente','Bom','Regular','Danificada'].map(value => option(value,value,draft.condition)).join('')}</select>`)}
         ${registrationField('Acabamento', `<select id="regFinish" class="field" onchange="refreshAutomaticPriceField('${esc(card.id)}', this.value)">${['comum','holografica','reversa','especial','full art','secreta','jumbo','outro'].map(value => option(value,value,draft.finish)).join('')}</select>`)}
         ${registrationField('Idioma', `<select id="regLanguage" class="field">${['Portugues BR','Ingles','Japones','Espanhol','Outro'].map(value => option(value,value,draft.language)).join('')}</select>`)}
@@ -2014,6 +2104,14 @@ function openCard(cardId, variantId = undefined) {
       </div>
     </section>`);
   ensureCardPriceLoaded(card.id, draft.finish);
+}
+
+function changeRegistrationQuantity(delta) {
+  const input = document.getElementById('regQuantity');
+  if (!input) return;
+  const current = Math.max(0, Number.parseInt(input.value || '0', 10) || 0);
+  input.value = String(Math.max(0, current + Number(delta || 0)));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 function registrationField(label, control) {
@@ -2435,21 +2533,28 @@ function openBackupPanel() {
     </div>`);
 }
 
-function exportBackup() {
-  const payload = JSON.stringify({
-    format: 'fichario-pokemon-br-plus-backup',
-    exportedAt: new Date().toISOString(),
-    state,
-    priceCache,
-    fxCache,
-    ligaSetCache,
-  }, null, 2);
-  if (window.Android?.exportBackup) window.Android.exportBackup(payload);
-  else {
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(new Blob([payload], {type:'application/json'}));
-    link.download = 'fichario-pokemon-backup.json';
-    link.click();
+async function exportBackup() {
+  try {
+    const localImages = await window.FicharioLocalImages?.exportData?.() || [];
+    const payload = JSON.stringify({
+      format: 'fichario-pokemon-br-plus-backup',
+      backupVersion: 2,
+      exportedAt: new Date().toISOString(),
+      state,
+      priceCache,
+      fxCache,
+      ligaSetCache,
+      localImages,
+    }, null, 2);
+    if (window.Android?.exportBackup) window.Android.exportBackup(payload);
+    else {
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(new Blob([payload], {type:'application/json'}));
+      link.download = 'fichario-pokemon-backup.json';
+      link.click();
+    }
+  } catch (_) {
+    notify('Não foi possível preparar o backup');
   }
 }
 
@@ -2457,7 +2562,7 @@ function importBackup() {
   if (window.Android?.importBackup) window.Android.importBackup();
 }
 
-window.receiveImportedBackup = function(raw) {
+window.receiveImportedBackup = async function(raw) {
   try {
     const payload = JSON.parse(raw);
     if (payload?.format !== 'fichario-pokemon-br-plus-backup' || !payload.state?.entries) throw new Error('Formato inválido');
@@ -2467,10 +2572,14 @@ window.receiveImportedBackup = function(raw) {
     if (payload.priceCache && typeof payload.priceCache === 'object') { priceCache = payload.priceCache; savePriceCache(); }
     if (payload.fxCache && typeof payload.fxCache === 'object') { fxCache = payload.fxCache; saveFxCache(); }
     if (payload.ligaSetCache && typeof payload.ligaSetCache === 'object') { ligaSetCache = payload.ligaSetCache; saveLigaSetCache(); }
+    let restoredImages = 0;
+    if (Array.isArray(payload.localImages)) {
+      restoredImages = await window.FicharioLocalImages?.importData?.(payload.localImages, true) || 0;
+    }
     saveState();
     closeModal();
     render();
-    notify('Backup importado com sucesso');
+    notify(restoredImages ? `Backup importado · ${restoredImages} imagens restauradas` : 'Backup importado com sucesso');
   } catch (_) {
     notify('Este arquivo não é um backup válido');
   }

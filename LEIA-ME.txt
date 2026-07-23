@@ -1,0 +1,12 @@
+PATCH v0.28 - PREÇOS ROBUSTOS
+
+1. Extraia este ZIP.
+2. Copie a pasta app e o arquivo RELEASE_NOTES.md.
+3. Cole na raiz do repositório e confirme a substituição.
+4. Faça commit e Push origin.
+5. Aguarde o GitHub Actions e atualize pelo app.
+
+Arquivos alterados:
+- app/src/main/assets/www/app.js
+- app/build.gradle
+- RELEASE_NOTES.md
