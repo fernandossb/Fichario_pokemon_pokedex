@@ -591,3 +591,41 @@ body::after {
 @media(max-width:430px){
   .app-header{min-height:143px}.gengar-header-art{width:126px;height:126px;right:47px}.header-row h1{font-size:28px}.tab{min-width:65px;flex-basis:65px}.tabs{padding-left:7px;padding-right:7px}
 }
+
+/* v1.3.2 — fundo geral Gengar + Pokédex registrada nítida */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(8, 5, 13, .80), rgba(8, 5, 13, .80)),
+    url('gengar-wallpaper.webp');
+  background-position: center top;
+  background-repeat: no-repeat;
+  background-size: cover;
+  opacity: .20;
+}
+.app { position: relative; z-index: 1; }
+
+/* O sprite antigo continua destacado no cabeçalho; o wallpaper só aparece fora dele. */
+.app-header { isolation: isolate; }
+
+/* Pokémon registrados: cartão branco e sprite 100% nítido. */
+.pokemon-tile:not(.missing) {
+  background: #ffffff !important;
+  border-color: #d8dce5 !important;
+  opacity: 1 !important;
+  box-shadow: 0 6px 18px rgba(0,0,0,.28) !important;
+}
+.pokemon-tile:not(.missing) img {
+  opacity: 1 !important;
+  filter: none !important;
+}
+.pokemon-tile:not(.missing) .pokemon-number { color: #697386 !important; }
+.pokemon-tile:not(.missing) .pokemon-name { color: #15223a !important; }
+
+/* Pokémon ainda não registrados permanecem discretos/translúcidos. */
+.pokemon-tile.missing { opacity: .42 !important; }
+.pokemon-tile.missing img { opacity: .48 !important; filter: saturate(.75); }

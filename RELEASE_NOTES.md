@@ -1,3 +1,10 @@
+# v1.3.2 — Wallpaper Gengar e Pokédex nítida
+
+- Mantido o sprite antigo do Gengar no cabeçalho.
+- Imagem enviada aplicada como papel de parede fora do cabeçalho, com 20% de transparência.
+- Pokémon com cartas registradas aparecem na Pokédex com fundo branco e sprite totalmente nítido.
+- Pokémon ainda não registrados permanecem translúcidos.
+
 # v1.3.0 — Tema Gengar
 
 - Tema visual roxo e preto inspirado no Gengar.
