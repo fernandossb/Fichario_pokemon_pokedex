@@ -386,9 +386,26 @@ button, input, select, textarea { font: inherit; }
 }
 .local-card-image-toolbar {
   display: flex;
-  justify-content: center;
-  margin: 10px 0 4px;
+  justify-content: stretch;
+  width: 100%;
+  margin: 4px 0 16px;
+  clear: both;
 }
+.local-card-image-button {
+  width: 100%;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px solid rgba(195, 78, 255, .65);
+  border-radius: 13px;
+  background: rgba(65, 16, 83, .72);
+  color: #fff;
+  font-weight: 900;
+  box-shadow: 0 6px 18px rgba(147, 37, 201, .18);
+}
+.local-card-image-button:active { transform: scale(.985); }
 .compact-btn {
   width: auto;
   min-height: 38px;

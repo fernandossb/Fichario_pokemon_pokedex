@@ -195,12 +195,17 @@
   function injectModalButton() {
     const modal = document.getElementById('modal-content');
     if (!modal || !activeCardId || modal.querySelector('.local-card-image-toolbar')) return;
-    const art = modal.querySelector('.registration-card-image, .registration-placeholder, [data-card-art-id]');
-    if (!art) return;
+    const header = modal.querySelector('.registration-header');
+    const artFrame = modal.querySelector('.registration-image-frame, [data-card-art-id]');
+    if (!header || !artFrame) return;
     const toolbar = document.createElement('div');
     toolbar.className = 'local-card-image-toolbar';
-    toolbar.innerHTML = `<button class="secondary-btn compact-btn" onclick="FicharioLocalImages.open('${activeCardId}')">Imagem: câmera/galeria</button>`;
-    art.insertAdjacentElement('afterend', toolbar);
+    toolbar.innerHTML = `
+      <button class="secondary-btn local-card-image-button" onclick="FicharioLocalImages.open('${activeCardId}')">
+        <span aria-hidden="true">📷</span>
+        <span>Adicionar ou trocar foto da carta</span>
+      </button>`;
+    header.insertAdjacentElement('afterend', toolbar);
   }
 
   try {

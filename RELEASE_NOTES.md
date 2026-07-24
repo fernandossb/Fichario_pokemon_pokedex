@@ -1,3 +1,9 @@
+# v2.0.0 — Botão de foto acessível
+
+- O botão para adicionar ou trocar a foto local da carta foi movido para fora da área da arte.
+- O botão agora ocupa toda a largura logo abaixo do cabeçalho do cadastro, facilitando o toque mesmo quando a imagem não carrega.
+- Nenhuma outra função ou parte visual foi alterada.
+
 # v1.3.7 — Layout das cartas do deck
 
 - Arte da carta passa a ocupar uma coluna fixa e independente.
