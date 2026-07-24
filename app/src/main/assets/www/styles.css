@@ -725,3 +725,97 @@ body::before {
     padding-top: calc(20px + var(--safe-top));
   }
 }
+
+/* =========================================================
+   v1.3.4 — contraste completo em cartões e controles brancos
+   ========================================================= */
+
+/* Componentes que permanecem claros no Tema Gengar precisam usar tinta
+   roxo-escura. Esta lista cobre os cartões reais usados no catálogo,
+   coleção, decks, Pokédex, painel e formulários. */
+:where(
+  .card-row,
+  .panel,
+  .stat-card,
+  .set-card,
+  .pokemon-tile:not(.missing),
+  .deck-card-row,
+  .deck-picker button,
+  .deck-validation,
+  .registration-section,
+  .registration-image-frame,
+  .notice,
+  .field,
+  .white-surface,
+  .light-surface
+) {
+  --white-card-ink: #2a0a3c;
+  --white-card-muted: #665170;
+  color: var(--white-card-ink) !important;
+}
+
+/* Texto principal dentro das superfícies claras. */
+:where(
+  .card-row,
+  .panel,
+  .stat-card,
+  .set-card,
+  .pokemon-tile:not(.missing),
+  .deck-card-row,
+  .deck-picker button,
+  .deck-validation,
+  .registration-section,
+  .registration-image-frame,
+  .notice,
+  .white-surface,
+  .light-surface
+) :where(h1,h2,h3,h4,h5,h6,strong,b,p,label,span,small,div) {
+  color: var(--white-card-ink) !important;
+  text-shadow: none !important;
+}
+
+/* Informações secundárias continuam visíveis, mas com hierarquia. */
+:where(
+  .card-row,
+  .panel,
+  .stat-card,
+  .set-card,
+  .pokemon-tile:not(.missing),
+  .deck-card-row,
+  .deck-picker button,
+  .registration-section,
+  .notice,
+  .white-surface,
+  .light-surface
+) :where(.card-meta,.muted,.pokemon-number,.set-progress-text,small) {
+  color: var(--white-card-muted) !important;
+}
+
+/* Campos brancos: texto digitado, opções e placeholder escuros. */
+:where(.field,input,select,textarea)[class],
+.field,
+.white-surface :where(input,select,textarea),
+.light-surface :where(input,select,textarea) {
+  color: #2a0a3c;
+  caret-color: #7f26a8;
+}
+.field::placeholder,
+.white-surface :where(input,textarea)::placeholder,
+.light-surface :where(input,textarea)::placeholder {
+  color: #806e88;
+  opacity: 1;
+}
+
+/* Preserva componentes com cor própria dentro de cartões claros. */
+:where(.card-row,.panel,.stat-card,.set-card,.pokemon-tile:not(.missing),.deck-card-row,.registration-section,.white-surface,.light-surface)
+:where(.badge,.chip.active,.filter-pill.active,.variant-chip.active,.qty-btn,.quantity-btn,.primary-btn,.danger-btn,.pokemon-owned-count,.toggle-ui,.price-verification) {
+  color: inherit;
+}
+:where(.card-row,.panel,.stat-card,.set-card,.pokemon-tile:not(.missing),.deck-card-row,.registration-section,.white-surface,.light-surface)
+:where(.qty-btn,.quantity-btn,.primary-btn,.chip.active,.filter-pill.active,.variant-chip.active) {
+  color: #fff !important;
+}
+:where(.card-row,.panel,.stat-card,.set-card,.pokemon-tile:not(.missing),.deck-card-row,.registration-section,.white-surface,.light-surface)
+:where(.badge.green,.pokemon-owned-count,.price-verification.ok) {
+  color: #fff !important;
+}

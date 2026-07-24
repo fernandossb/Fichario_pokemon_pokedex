@@ -1,3 +1,10 @@
+# v1.3.4 — Contraste dos cartões claros
+
+- Textos, números e rótulos em cartões brancos agora usam roxo-escuro.
+- Correção aplicada a cartas, Pokémon registrados, decks, painel, coleções e formulários.
+- Campos brancos e placeholders receberam contraste aprimorado.
+- Botões ativos, selos e indicadores coloridos preservam suas cores originais.
+
 # v1.3.3 — Safe-area e contraste
 
 - Cabeçalho fixo agora ocupa a área da barra de status do Android.

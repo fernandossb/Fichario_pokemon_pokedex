@@ -10,8 +10,8 @@ android {
         applicationId 'br.com.fichariopokemon.pokedex'
         minSdk 26
         targetSdk 35
-        versionCode 36
-        versionName '1.3.3-gengar-safe-area-contraste'
+        versionCode 37
+        versionName '1.3.4-gengar-contraste-cartoes'
     }
 
     signingConfigs {
