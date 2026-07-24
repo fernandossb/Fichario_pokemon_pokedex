@@ -10,8 +10,8 @@ android {
         applicationId 'br.com.fichariopokemon.pokedex'
         minSdk 26
         targetSdk 35
-        versionCode 39
-        versionName '1.3.6-gengar-contraste-final'
+        versionCode 40
+        versionName '1.3.7-gengar-deck-layout'
     }
 
     signingConfigs {

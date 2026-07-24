@@ -1,3 +1,10 @@
+# v1.3.7 — Layout das cartas do deck
+
+- Arte da carta passa a ocupar uma coluna fixa e independente.
+- Nome e coleção não invadem mais o espaço da imagem.
+- Quantidade e botões +/− ficam em área própria, inclusive em telas estreitas.
+- Cartas sem arte mantêm um espaço reservado com “Buscando arte…”.
+
 # v1.3.6 — Contraste final e preços em tons pastéis
 
 - Rótulos de Quantidade, Condição, Acabamento, Idioma, armazenamento e demais formulários agora usam texto claro sobre o fundo escuro.

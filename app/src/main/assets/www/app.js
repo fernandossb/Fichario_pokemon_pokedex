@@ -2587,7 +2587,12 @@ function renderDeckCardRow(deck, cardId, qty) {
   if (!card) return '';
   const owned = quantityFor(cardId);
   return `<div class="deck-card-row">
-    ${card.imageUrl ? `<img src="${esc(card.imageUrl)}" onerror="this.style.display='none'">` : ''}
+    <div class="deck-card-art">
+      ${card.imageUrl
+        ? `<img class="deck-card-image" src="${esc(card.imageUrl)}" alt="${esc(card.name)}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+        : ''}
+      <div class="deck-card-placeholder" style="${card.imageUrl ? 'display:none' : 'display:flex'}">Buscando arte…</div>
+    </div>
     <div class="deck-card-info"><strong>${esc(card.name)}</strong><span>${esc(card.number)} · ${esc(card.setName)} · você tem ${owned}</span></div>
     <div class="deck-qty"><button onclick="changeDeckCard('${esc(deck.id)}','${esc(cardId)}',-1)">−</button><b>${qty}</b><button onclick="changeDeckCard('${esc(deck.id)}','${esc(cardId)}',1)">+</button></div>
   </div>`;

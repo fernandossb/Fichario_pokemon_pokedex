@@ -1237,3 +1237,95 @@ textarea.field:disabled {
   color: #ffffff !important;
   -webkit-text-fill-color: #ffffff !important;
 }
+
+/* v1.3.7 — alinhamento das cartas dentro do deck */
+.deck-card-row {
+  grid-template-columns: 88px minmax(0, 1fr) auto !important;
+  grid-template-areas: "art info qty" !important;
+  column-gap: 14px !important;
+  row-gap: 8px !important;
+  min-height: 112px;
+  padding: 12px !important;
+  align-items: center !important;
+}
+.deck-card-art {
+  grid-area: art;
+  width: 88px;
+  height: 104px;
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(145deg, #eef6ff, #e4effc);
+  flex: 0 0 auto;
+}
+.deck-card-row .deck-card-art > img,
+.deck-card-row .deck-card-image {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
+  border-radius: 8px !important;
+  display: block;
+}
+.deck-card-placeholder {
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  text-align: center;
+  color: #725d7b !important;
+  -webkit-text-fill-color: #725d7b;
+  font-size: 10px;
+  line-height: 1.25;
+}
+.deck-card-info {
+  grid-area: info;
+  align-self: center;
+  min-width: 0;
+  padding-right: 4px;
+}
+.deck-card-info strong {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  line-height: 1.2;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.deck-card-info span {
+  display: block;
+  margin-top: 5px;
+  line-height: 1.35 !important;
+  overflow-wrap: anywhere;
+}
+.deck-card-row .deck-qty {
+  grid-area: qty;
+  justify-self: end;
+  flex-wrap: nowrap;
+  min-width: 116px;
+}
+.deck-card-row .deck-qty b {
+  min-width: 24px;
+  font-size: 16px;
+}
+
+@media (max-width: 430px) {
+  .deck-card-row {
+    grid-template-columns: 82px minmax(0, 1fr) !important;
+    grid-template-areas:
+      "art info"
+      "art qty" !important;
+    min-height: 112px;
+  }
+  .deck-card-art {
+    width: 82px;
+    height: 104px;
+  }
+  .deck-card-row .deck-qty {
+    justify-self: start;
+    align-self: end;
+    min-width: 0;
+  }
+}
