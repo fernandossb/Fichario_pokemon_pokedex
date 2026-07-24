@@ -1,3 +1,10 @@
+# v2.0.1 — Prioridade absoluta para imagem local
+
+- A foto escolhida pelo usuário passa a ter prioridade sobre catálogo, cache e buscas online.
+- A imagem local é aplicada imediatamente após ser salva e reaplicada após a renderização da tela.
+- A busca automática não pode mais substituir uma foto local existente.
+- Ao remover a foto local, o aplicativo volta normalmente à cascata de imagens online.
+
 # v2.0.0 — Botão de foto acessível
 
 - O botão para adicionar ou trocar a foto local da carta foi movido para fora da área da arte.

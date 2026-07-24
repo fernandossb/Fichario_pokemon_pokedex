@@ -133,9 +133,14 @@
       if (!String(file.type || '').startsWith('image/')) throw new Error('Selecione uma imagem');
       const dataUrl = await compress(file);
       await put(activeCardId, dataUrl);
-      window.FicharioImageFallback?.retry(activeCardId);
+
+      // A foto escolhida pelo usuário sempre tem prioridade absoluta.
+      // Aplicamos imediatamente antes de qualquer nova renderização para impedir
+      // que a arte do catálogo ou uma busca online volte a ocupar o espaço.
+      await window.FicharioImageFallback?.useLocalImage?.(activeCardId, dataUrl);
       closeModal?.();
       render?.();
+      requestAnimationFrame(() => window.FicharioImageFallback?.useLocalImage?.(activeCardId, dataUrl));
       notify?.('Imagem local salva');
     } catch (error) {
       notify?.(error?.message || 'Não foi possível salvar a imagem');
@@ -163,6 +168,7 @@
     const id = String(cardId || '');
     if (!window.confirm('Remover a imagem local desta carta?')) return;
     await remove(id);
+    window.FicharioImageFallback?.forgetLocalImage?.(id);
     window.FicharioImageFallback?.retry(id);
     closeModal?.();
     render?.();

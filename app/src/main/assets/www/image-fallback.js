@@ -20,6 +20,8 @@
   const POKEMON_TCG_ROOT = 'https://api.pokemontcg.io/v2/cards';
   const attempts = new Map();
   const resolving = new Map();
+  const localImageState = new Map();
+  const localImageChecks = new Map();
   let activeCardId = '';
   let cache = {};
   let diagnostics = {};
@@ -357,7 +359,11 @@
     img.dataset.cardArtUrl = url;
     if (source) img.dataset.cardArtSource = source;
     img.addEventListener('load', () => {
-      remember(cardId, img.currentSrc || img.src, source || img.dataset.cardArtSource || 'validated');
+      const loadedSource = source || img.dataset.cardArtSource || 'validated';
+      // Nunca deixe uma resposta online posterior sobrescrever a preferência local.
+      if (loadedSource === 'imagem-local-usuario' || !localImageState.get(String(cardId))) {
+        remember(cardId, img.currentSrc || img.src, loadedSource);
+      }
       img.classList.remove('card-art-loading');
     }, { once: true });
     img.addEventListener('error', () => handleFailure(img, cardId), { once: true });
@@ -404,6 +410,64 @@
     return placeholder;
   }
 
+  async function readLocalImage(cardId, force = false) {
+    const id = String(cardId || '');
+    if (!id) return null;
+    if (!force && localImageState.has(id)) return localImageState.get(id);
+    if (!force && localImageChecks.has(id)) return localImageChecks.get(id);
+
+    const check = (async () => {
+      try {
+        const item = await window.FicharioLocalImages?.get?.(id);
+        const dataUrl = item?.dataUrl || null;
+        localImageState.set(id, dataUrl);
+        return dataUrl;
+      } catch (_) {
+        localImageState.set(id, null);
+        return null;
+      } finally {
+        localImageChecks.delete(id);
+      }
+    })();
+    localImageChecks.set(id, check);
+    return check;
+  }
+
+  async function useLocalImage(cardId, knownDataUrl = '') {
+    const id = String(cardId || '');
+    if (!id) return false;
+    const dataUrl = knownDataUrl || await readLocalImage(id, true);
+    localImageState.set(id, dataUrl || null);
+    if (!dataUrl) return false;
+
+    attempts.delete(id);
+    resolving.delete(id);
+    delete cache[id];
+    saveCache();
+    applyUrl(id, dataUrl, 'imagem-local-usuario');
+    return true;
+  }
+
+  function forgetLocalImage(cardId) {
+    const id = String(cardId || '');
+    localImageState.delete(id);
+    localImageChecks.delete(id);
+  }
+
+  function enforceLocalPriority(cardId) {
+    const id = String(cardId || '');
+    if (!id) return;
+    readLocalImage(id).then(dataUrl => {
+      if (!dataUrl) return;
+      const targets = targetsFor(id);
+      const alreadyLocal = targets.length && targets.every(target =>
+        target.tagName === 'IMG' &&
+        (target.dataset.cardArtSource === 'imagem-local-usuario' || target.src === dataUrl)
+      );
+      if (!alreadyLocal) applyUrl(id, dataUrl, 'imagem-local-usuario');
+    });
+  }
+
   function targetsFor(cardId) {
     return [...document.querySelectorAll(`[data-card-art-id="${CSS.escape(String(cardId))}"]`)];
   }
@@ -442,7 +506,8 @@
 
     const cached = cache[card.id];
     if (!force && cached?.url && Date.now() - Number(cached.savedAt || 0) < CACHE_TTL) {
-      list.unshift({ url: cached.url, source: cached.source || 'cache' });
+      // O cache online vem depois da imagem local e da foto do usuário.
+      list.push({ url: cached.url, source: cached.source || 'cache' });
     }
 
     // Algumas coleções especiais (como SVE/MEE) possuem os arquivos no CDN,
@@ -517,20 +582,33 @@
   }
 
   function prepareTarget(target, cardId) {
-    if (!target || !cardId || target.dataset.cardArtPrepared === '1') return;
-    target.dataset.cardArtPrepared = '1';
+    if (!target || !cardId) return;
     target.dataset.cardArtId = cardId;
+
+    // Mesmo que a tela já tenha sido renderizada com a URL do catálogo,
+    // verificamos a foto local e a aplicamos por cima imediatamente.
+    enforceLocalPriority(cardId);
+
+    if (target.dataset.cardArtPrepared === '1') return;
+    target.dataset.cardArtPrepared = '1';
     if (target.tagName === 'IMG') {
       const url = target.currentSrc || target.src || '';
       target.dataset.cardArtUrl = url;
       target.dataset.cardArtSource = target.dataset.cardArtSource || 'catalogo-renderizado';
-      target.addEventListener('load', () => remember(cardId, target.currentSrc || target.src, target.dataset.cardArtSource), { once: true });
+      target.addEventListener('load', () => {
+        if (!localImageState.get(String(cardId))) {
+          remember(cardId, target.currentSrc || target.src, target.dataset.cardArtSource);
+        }
+      }, { once: true });
       target.addEventListener('error', () => handleFailure(target, cardId), { once: true });
       return;
     }
     target.classList.add('card-art-fallback');
     target.innerHTML = '<span>Buscando arte…</span>';
-    resolveAndApply(cardId, false);
+    readLocalImage(cardId).then(dataUrl => {
+      if (dataUrl) applyUrl(cardId, dataUrl, 'imagem-local-usuario');
+      else resolveAndApply(cardId, false);
+    });
   }
 
   function scanCards() {
@@ -579,13 +657,18 @@
   else start();
 
   window.FicharioImageFallback = {
+    useLocalImage,
+    forgetLocalImage,
     retry(cardId) {
       const id = String(cardId || '');
       attempts.delete(id);
       resolving.delete(id);
       delete cache[id];
       saveCache();
-      resolveAndApply(id, true);
+      readLocalImage(id, true).then(dataUrl => {
+        if (dataUrl) applyUrl(id, dataUrl, 'imagem-local-usuario');
+        else resolveAndApply(id, true);
+      });
     },
     clearCache() {
       cache = {};
