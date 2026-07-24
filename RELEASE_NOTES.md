@@ -1,3 +1,12 @@
+# v1.3.5 — Contraste adaptativo e leitura corrigida
+
+- Corrigido texto escuro sobre filtros e campos escuros do Tema Gengar.
+- Cartões brancos de cartas, Pokémon e decks usam roxo-escuro de alto contraste.
+- Cartas não possuídas não deixam mais o cartão inteiro transparente; apenas a miniatura fica suavizada.
+- Selos de quantidade, preço, raridade, wishlist e variantes receberam combinações específicas de fundo e texto.
+- Botões de quantidade mantêm símbolos brancos e o número central permanece legível.
+- Estados desabilitados e placeholders receberam contraste mínimo consistente.
+
 # v1.3.4 — Contraste dos cartões claros
 
 - Textos, números e rótulos em cartões brancos agora usam roxo-escuro.
