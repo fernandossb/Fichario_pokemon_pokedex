@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "211768760914",
+    "project_id": "fichariopokemon-1546c",
+    "storage_bucket": "fichariopokemon-1546c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:211768760914:android:829598154d28560f5fdd8b",
+        "android_client_info": {
+          "package_name": "br.com.fichariopokemon.pokedex"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAEsbGRlTW3i9chqCaaO6EJ8T1VxsHGwt0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

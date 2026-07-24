@@ -1,3 +1,11 @@
+# Fichário Pokémon 2.0.2 — Firebase Analytics
+
+- Integração oficial com Firebase Analytics.
+- Contagem anônima de usuários ativos e novos usuários.
+- Relatórios de versões do aplicativo, modelos de aparelhos e versões do Android.
+- Registro automático de sessões e abertura do aplicativo.
+- Nenhum nome, e-mail, foto ou conteúdo individual da coleção é enviado por esta integração.
+
 # v2.0.1 — Prioridade absoluta para imagem local
 
 - A foto escolhida pelo usuário passa a ter prioridade sobre catálogo, cache e buscas online.

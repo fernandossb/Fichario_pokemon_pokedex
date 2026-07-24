@@ -33,6 +33,8 @@ import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
 
+import com.google.firebase.analytics.FirebaseAnalytics;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -74,11 +76,13 @@ public final class MainActivity extends Activity {
     private Uri pendingCameraImageUri;
     private double topInsetCss;
     private double bottomInsetCss;
+    private FirebaseAnalytics firebaseAnalytics;
 
     @SuppressLint({"SetJavaScriptEnabled", "JavascriptInterface"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        firebaseAnalytics = FirebaseAnalytics.getInstance(this);
         // O conteúdo ocupa também a área da barra de status. O cabeçalho Web ajusta
         // internamente o safe-area para que títulos e botões nunca fiquem sob os ícones.
         getWindow().setStatusBarColor(Color.TRANSPARENT);

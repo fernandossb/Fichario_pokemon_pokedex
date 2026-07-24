@@ -1,5 +1,6 @@
 plugins {
     id 'com.android.application'
+    id 'com.google.gms.google-services'
 }
 
 android {
@@ -10,8 +11,8 @@ android {
         applicationId 'br.com.fichariopokemon.pokedex'
         minSdk 26
         targetSdk 35
-        versionCode 42
-        versionName '2.0.1-prioridade-imagem-local'
+        versionCode 43
+        versionName '2.0.2-firebase-analytics'
     }
 
     signingConfigs {
@@ -48,6 +49,10 @@ android {
 
 dependencies {
     implementation 'androidx.core:core:1.13.1'
+
+    // Firebase Analytics: usuários ativos, versões, dispositivos e sessões.
+    implementation platform('com.google.firebase:firebase-bom:34.16.0')
+    implementation 'com.google.firebase:firebase-analytics'
 }
 
 
