@@ -629,3 +629,611 @@ body::before {
 /* Pokémon ainda não registrados permanecem discretos/translúcidos. */
 .pokemon-tile.missing { opacity: .42 !important; }
 .pokemon-tile.missing img { opacity: .48 !important; filter: saturate(.75); }
+
+
+/* =========================================================
+   v1.3.3 — cabeçalho edge-to-edge e contraste em superfícies claras
+   ========================================================= */
+
+/* O WebView agora ocupa a barra de status. A altura segura passa a fazer
+   parte do cabeçalho, eliminando a faixa vazia acima dele. */
+body {
+  padding-top: 0 !important;
+}
+.sticky-shell {
+  top: 0 !important;
+}
+.app-header {
+  min-height: calc(151px + var(--safe-top));
+  padding-top: calc(20px + var(--safe-top));
+}
+
+/* A antiga faixa isolada do safe-area não é mais necessária: o próprio
+   cabeçalho fornece o fundo sob relógio, sinal, Wi‑Fi e bateria. */
+body::before {
+  top: 0;
+}
+
+/* Superfícies claras mantêm texto roxo-escuro com contraste forte.
+   As regras são específicas para não alterar cartões escuros do tema. */
+.pokemon-tile:not(.missing),
+.deck-card-row,
+.deck-picker button,
+.deck-validation,
+.registration-image-frame,
+.pokemon-hero img,
+.white-surface,
+.light-surface {
+  --light-surface-ink: #2b0b3d;
+  --light-surface-muted: #65526f;
+  color: var(--light-surface-ink) !important;
+}
+
+.pokemon-tile:not(.missing) .pokemon-number,
+.pokemon-tile:not(.missing) .pokemon-name,
+.pokemon-tile:not(.missing) strong,
+.pokemon-tile:not(.missing) span:not(.pokemon-owned-count),
+.deck-card-row .deck-card-info strong,
+.deck-card-row .deck-card-info span,
+.deck-card-row .deck-qty b,
+.deck-picker button strong,
+.deck-picker button span,
+.deck-validation,
+.white-surface h1,
+.white-surface h2,
+.white-surface h3,
+.white-surface strong,
+.white-surface span,
+.white-surface p,
+.white-surface small,
+.light-surface h1,
+.light-surface h2,
+.light-surface h3,
+.light-surface strong,
+.light-surface span,
+.light-surface p,
+.light-surface small {
+  color: var(--light-surface-ink) !important;
+  text-shadow: none !important;
+}
+
+.pokemon-tile:not(.missing) .pokemon-number,
+.deck-card-row .deck-card-info span,
+.deck-picker button span,
+.white-surface small,
+.white-surface .muted,
+.light-surface small,
+.light-surface .muted {
+  color: var(--light-surface-muted) !important;
+}
+
+/* Inputs claros eventualmente criados por componentes futuros também
+   recebem texto legível automaticamente quando marcados como light-surface. */
+.white-surface input,
+.white-surface select,
+.white-surface textarea,
+.light-surface input,
+.light-surface select,
+.light-surface textarea {
+  color: #2b0b3d !important;
+  caret-color: #6f1f94;
+}
+
+@media (max-width: 430px) {
+  .app-header {
+    min-height: calc(143px + var(--safe-top));
+    padding-top: calc(20px + var(--safe-top));
+  }
+}
+
+/* =========================================================
+   v1.3.4 — contraste completo em cartões e controles brancos
+   ========================================================= */
+
+/* Componentes que permanecem claros no Tema Gengar precisam usar tinta
+   roxo-escura. Esta lista cobre os cartões reais usados no catálogo,
+   coleção, decks, Pokédex, painel e formulários. */
+:where(
+  .card-row,
+  .panel,
+  .stat-card,
+  .set-card,
+  .pokemon-tile:not(.missing),
+  .deck-card-row,
+  .deck-picker button,
+  .deck-validation,
+  .registration-section,
+  .registration-image-frame,
+  .notice,
+  .field,
+  .white-surface,
+  .light-surface
+) {
+  --white-card-ink: #2a0a3c;
+  --white-card-muted: #665170;
+  color: var(--white-card-ink) !important;
+}
+
+/* Texto principal dentro das superfícies claras. */
+:where(
+  .card-row,
+  .panel,
+  .stat-card,
+  .set-card,
+  .pokemon-tile:not(.missing),
+  .deck-card-row,
+  .deck-picker button,
+  .deck-validation,
+  .registration-section,
+  .registration-image-frame,
+  .notice,
+  .white-surface,
+  .light-surface
+) :where(h1,h2,h3,h4,h5,h6,strong,b,p,label,span,small,div) {
+  color: var(--white-card-ink) !important;
+  text-shadow: none !important;
+}
+
+/* Informações secundárias continuam visíveis, mas com hierarquia. */
+:where(
+  .card-row,
+  .panel,
+  .stat-card,
+  .set-card,
+  .pokemon-tile:not(.missing),
+  .deck-card-row,
+  .deck-picker button,
+  .registration-section,
+  .notice,
+  .white-surface,
+  .light-surface
+) :where(.card-meta,.muted,.pokemon-number,.set-progress-text,small) {
+  color: var(--white-card-muted) !important;
+}
+
+/* Campos brancos: texto digitado, opções e placeholder escuros. */
+:where(.field,input,select,textarea)[class],
+.field,
+.white-surface :where(input,select,textarea),
+.light-surface :where(input,select,textarea) {
+  color: #2a0a3c;
+  caret-color: #7f26a8;
+}
+.field::placeholder,
+.white-surface :where(input,textarea)::placeholder,
+.light-surface :where(input,textarea)::placeholder {
+  color: #806e88;
+  opacity: 1;
+}
+
+/* Preserva componentes com cor própria dentro de cartões claros. */
+:where(.card-row,.panel,.stat-card,.set-card,.pokemon-tile:not(.missing),.deck-card-row,.registration-section,.white-surface,.light-surface)
+:where(.badge,.chip.active,.filter-pill.active,.variant-chip.active,.qty-btn,.quantity-btn,.primary-btn,.danger-btn,.pokemon-owned-count,.toggle-ui,.price-verification) {
+  color: inherit;
+}
+:where(.card-row,.panel,.stat-card,.set-card,.pokemon-tile:not(.missing),.deck-card-row,.registration-section,.white-surface,.light-surface)
+:where(.qty-btn,.quantity-btn,.primary-btn,.chip.active,.filter-pill.active,.variant-chip.active) {
+  color: #fff !important;
+}
+:where(.card-row,.panel,.stat-card,.set-card,.pokemon-tile:not(.missing),.deck-card-row,.registration-section,.white-surface,.light-surface)
+:where(.badge.green,.pokemon-owned-count,.price-verification.ok) {
+  color: #fff !important;
+}
+
+/* =========================================================
+   v1.3.5 — contraste adaptativo e leitura corrigida
+   ========================================================= */
+
+/*
+ * A versão anterior aplicava roxo-escuro em descendentes de componentes
+ * que, no Tema Gengar, continuam com fundo escuro. Isso deixou filtros,
+ * painéis e selos quase ilegíveis. As regras abaixo separam de forma clara
+ * superfícies claras e escuras e têm precedência por estarem no fim do CSS.
+ */
+
+/* 1) Superfícies escuras do Tema Gengar: sempre usar texto claro. */
+:where(
+  .panel,
+  .stat-card,
+  .set-card,
+  .registration-section,
+  .catalog-update-card,
+  .price-update-card,
+  .notice,
+  .modal-sheet,
+  .deck-panel,
+  .toggle-card
+) {
+  color: #f7f0fb !important;
+}
+
+:where(
+  .panel,
+  .stat-card,
+  .set-card,
+  .registration-section,
+  .catalog-update-card,
+  .price-update-card,
+  .notice,
+  .modal-sheet,
+  .deck-panel,
+  .toggle-card
+) :where(h1,h2,h3,h4,h5,h6,strong,b,label,.stat-value,.set-name,.card-name,.registration-placeholder) {
+  color: #f7f0fb !important;
+  text-shadow: none !important;
+}
+
+:where(
+  .panel,
+  .stat-card,
+  .set-card,
+  .registration-section,
+  .catalog-update-card,
+  .price-update-card,
+  .notice,
+  .modal-sheet,
+  .deck-panel,
+  .toggle-card
+) :where(p,small,.muted,.card-meta,.set-progress-text,.registration-section-title span) {
+  color: #c5b4cf !important;
+  text-shadow: none !important;
+}
+
+/* 2) Campos escuros: letras, números, opções e placeholders claros. */
+.field,
+input.field,
+select.field,
+textarea.field,
+.read-only-field {
+  background: #12091b !important;
+  color: #f8f2fc !important;
+  border-color: #68347e !important;
+  -webkit-text-fill-color: #f8f2fc;
+}
+
+.field::placeholder,
+input.field::placeholder,
+textarea.field::placeholder {
+  color: #b9a8c3 !important;
+  opacity: 1 !important;
+  -webkit-text-fill-color: #b9a8c3;
+}
+
+select.field option {
+  background: #160a20;
+  color: #ffffff;
+}
+
+.field:disabled,
+input.field:disabled,
+select.field:disabled,
+textarea.field:disabled {
+  color: #d0c2d7 !important;
+  -webkit-text-fill-color: #d0c2d7;
+  opacity: .78;
+}
+
+/* 3) Chips e filtros escuros. */
+.chip,
+.filter-pill,
+.variant-chip {
+  background: #180b22 !important;
+  color: #eadff0 !important;
+  border-color: #68407a !important;
+  -webkit-text-fill-color: #eadff0;
+}
+
+.chip.active,
+.filter-pill.active,
+.variant-chip.active {
+  background: linear-gradient(145deg,#75209f,#b52ee8) !important;
+  color: #ffffff !important;
+  border-color: #d35cff !important;
+  -webkit-text-fill-color: #ffffff;
+}
+
+/* 4) Cartões de cartas são claros: conteúdo sempre roxo-escuro. */
+.card-row {
+  background: #ffffff !important;
+  color: #2b0b3d !important;
+  border-color: #ded2e5 !important;
+}
+.card-row .card-name,
+.card-row .qty-value,
+.card-row .card-main,
+.card-row .card-main > div:not(.badges):not(.quantity-control) {
+  color: #2b0b3d !important;
+  -webkit-text-fill-color: #2b0b3d;
+}
+.card-row .card-meta {
+  color: #725d7b !important;
+  -webkit-text-fill-color: #725d7b;
+}
+
+/* Não reduzir a opacidade do cartão inteiro quando a carta não é possuída.
+   Apenas a miniatura recebe um tratamento discreto. */
+.card-row.missing {
+  opacity: 1 !important;
+  background: #ffffff !important;
+  border-style: solid !important;
+}
+.card-row.missing .card-thumb,
+.card-row.missing .card-placeholder {
+  opacity: .72 !important;
+  filter: saturate(.82) !important;
+}
+.card-row.missing .card-main,
+.card-row.missing .card-name,
+.card-row.missing .card-meta,
+.card-row.missing .qty-value,
+.card-row.missing .badges,
+.card-row.missing .quantity-control {
+  opacity: 1 !important;
+}
+
+/* 5) Selos claros: texto explicitamente compatível com o fundo. */
+.card-row .badge,
+.pokemon-tile:not(.missing) .badge,
+.deck-card-row .badge {
+  background: #eee6f3 !important;
+  color: #3d1650 !important;
+  -webkit-text-fill-color: #3d1650;
+}
+.card-row .badge.owned,
+.pokemon-tile:not(.missing) .badge.owned,
+.deck-card-row .badge.owned {
+  background: #d9f6e5 !important;
+  color: #075d31 !important;
+  -webkit-text-fill-color: #075d31;
+}
+.card-row .badge.price,
+.card-row .badge.green,
+.pokemon-tile:not(.missing) .badge.price,
+.deck-card-row .badge.price {
+  background: #d8f3e4 !important;
+  color: #07552d !important;
+  -webkit-text-fill-color: #07552d;
+}
+.card-row .badge.yellow {
+  background: #fff0b8 !important;
+  color: #634900 !important;
+  -webkit-text-fill-color: #634900;
+}
+.card-row .badge.purple,
+.pokemon-tile:not(.missing) .badge.purple {
+  background: #eadcf4 !important;
+  color: #5b1c76 !important;
+  -webkit-text-fill-color: #5b1c76;
+}
+
+/* 6) Botões de quantidade: símbolos sempre brancos e número central escuro. */
+.card-row .qty-btn,
+.deck-card-row .qty-btn,
+.quantity-step-btn {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff;
+}
+.card-row .qty-value,
+.deck-card-row .deck-qty,
+.deck-card-row .deck-qty b {
+  color: #2b0b3d !important;
+  -webkit-text-fill-color: #2b0b3d;
+}
+
+/* 7) Pokémon em cartão claro. O cartão permanece nítido; apenas o sprite de
+   Pokémon ainda não registrado fica mais suave. */
+.pokemon-tile {
+  opacity: 1 !important;
+}
+.pokemon-tile:not(.missing),
+.pokemon-tile.missing {
+  background: #ffffff !important;
+  border-color: #ded2e5 !important;
+  color: #2b0b3d !important;
+}
+.pokemon-tile .pokemon-name,
+.pokemon-tile .pokemon-number,
+.pokemon-tile strong,
+.pokemon-tile span {
+  color: #2b0b3d !important;
+  -webkit-text-fill-color: #2b0b3d;
+}
+.pokemon-tile .pokemon-number {
+  color: #725d7b !important;
+  -webkit-text-fill-color: #725d7b;
+}
+.pokemon-tile.missing img {
+  opacity: .38 !important;
+  filter: saturate(.65) !important;
+}
+.pokemon-tile.missing .pokemon-name,
+.pokemon-tile.missing .pokemon-number {
+  opacity: .82 !important;
+}
+
+/* 8) Linhas de deck e validações claras. */
+.deck-card-row,
+.deck-validation,
+.deck-picker button {
+  background: #ffffff !important;
+  color: #2b0b3d !important;
+  border-color: #ded2e5 !important;
+}
+.deck-card-row :where(strong,b,.deck-card-info,.deck-qty),
+.deck-picker button :where(strong,b) {
+  color: #2b0b3d !important;
+  -webkit-text-fill-color: #2b0b3d;
+}
+.deck-card-row :where(span,small,.card-meta),
+.deck-picker button :where(span,small),
+.deck-validation {
+  color: #725d7b !important;
+  -webkit-text-fill-color: #725d7b;
+}
+
+/* 9) Estados desabilitados: manter contraste; não apagar toda a área. */
+.card-row button:disabled,
+.panel button:disabled,
+.registration-section button:disabled,
+.deck-card-row button:disabled {
+  opacity: .62 !important;
+}
+
+/* 10) Texto selecionado e foco visível. */
+::selection {
+  background: #a62bdd;
+  color: #ffffff;
+}
+.field:focus,
+.chip:focus-visible,
+.filter-pill:focus-visible,
+.variant-chip:focus-visible,
+.qty-btn:focus-visible,
+.quantity-step-btn:focus-visible {
+  outline: 2px solid #d75cff !important;
+  outline-offset: 2px;
+}
+
+/* =========================================================
+   v1.3.6 — contraste final, cartas ausentes e preço pastel
+   ========================================================= */
+
+/* Rótulos sobre superfícies escuras: nunca usar roxo quase preto. */
+.registration-field > span,
+.registration-section .registration-field > span,
+.registration-section > h3,
+.stat-card .stat-label,
+.panel .stat-label,
+.registration-section-title,
+.registration-section-title span,
+.screen-subtitle,
+.section-title,
+.toggle-card strong,
+.registration-section label,
+.registration-section .field-label {
+  color: #eadff1 !important;
+  -webkit-text-fill-color: #eadff1 !important;
+  opacity: 1 !important;
+  text-shadow: 0 1px 1px rgba(0,0,0,.28) !important;
+}
+
+/* Números e valores principais dos painéis escuros. */
+.stat-card .stat-value,
+.panel .stat-value {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+  opacity: 1 !important;
+}
+
+/* Inputs/selects escuros: reforço de contraste no conteúdo e nos títulos. */
+.registration-section .field,
+.registration-section input.field,
+.registration-section select.field,
+.registration-section textarea.field,
+.quantity-step-value {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+
+/* Cartas que o usuário não possui: aparência translúcida semelhante à
+   Pokédex, sem apagar nomes, números, badges e controles. */
+.card-row.missing {
+  opacity: 1 !important;
+  background: rgba(255,255,255,.62) !important;
+  border-color: rgba(221,205,230,.9) !important;
+  box-shadow: 0 5px 18px rgba(16,4,24,.18) !important;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+.card-row.missing .card-thumb,
+.card-row.missing .card-placeholder {
+  opacity: .42 !important;
+  filter: saturate(.58) contrast(.94) !important;
+}
+.card-row.missing .card-name,
+.card-row.missing .card-main,
+.card-row.missing .qty-value {
+  color: #3a174b !important;
+  -webkit-text-fill-color: #3a174b !important;
+  opacity: .88 !important;
+}
+.card-row.missing .card-meta {
+  color: #705b79 !important;
+  -webkit-text-fill-color: #705b79 !important;
+  opacity: .84 !important;
+}
+.card-row.missing .badge {
+  opacity: .78 !important;
+}
+.card-row.missing .quantity-control,
+.card-row.missing .qty-btn {
+  opacity: .88 !important;
+}
+
+/* Preço encontrado: verde pastel consistente, com texto verde-escuro. */
+.automatic-price-card:not(.empty-price):not(.loading-price) {
+  background: #e4f6e9 !important;
+  border-color: #91cda4 !important;
+  color: #123f25 !important;
+  box-shadow: 0 4px 15px rgba(43,117,68,.14) !important;
+}
+.automatic-price-card:not(.empty-price):not(.loading-price) strong {
+  color: #0b5b2d !important;
+  -webkit-text-fill-color: #0b5b2d !important;
+  font-weight: 950 !important;
+}
+.automatic-price-card:not(.empty-price):not(.loading-price) span,
+.automatic-price-card:not(.empty-price):not(.loading-price) small,
+.automatic-price-card:not(.empty-price):not(.loading-price) p {
+  color: #285c3a !important;
+  -webkit-text-fill-color: #285c3a !important;
+  opacity: 1 !important;
+}
+
+/* Sem preço: amarelo pastel, nunca cinza ou branco sem contraste. */
+.automatic-price-card.empty-price,
+.automatic-price-card.loading-price {
+  background: #fff4c9 !important;
+  border-color: #dfbf58 !important;
+  color: #614800 !important;
+  box-shadow: 0 4px 15px rgba(146,109,15,.13) !important;
+}
+.automatic-price-card.empty-price strong,
+.automatic-price-card.loading-price strong {
+  color: #694c00 !important;
+  -webkit-text-fill-color: #694c00 !important;
+}
+.automatic-price-card.empty-price span,
+.automatic-price-card.empty-price small,
+.automatic-price-card.loading-price span,
+.automatic-price-card.loading-price small {
+  color: #775f17 !important;
+  -webkit-text-fill-color: #775f17 !important;
+  opacity: 1 !important;
+}
+
+/* A caixa de revisão permanece dentro da área verde, mas seu aviso amarelo
+   usa contraste forte e independente. */
+.automatic-price-card .price-verification.review {
+  background: #fff0b5 !important;
+  color: #684b00 !important;
+  -webkit-text-fill-color: #684b00 !important;
+  border: 1px solid #e6c45d;
+}
+.automatic-price-card .price-verification.verified {
+  background: #ccefd7 !important;
+  color: #07552a !important;
+  -webkit-text-fill-color: #07552a !important;
+}
+.automatic-price-card .price-verification.user-validated {
+  background: #dddff8 !important;
+  color: #303a82 !important;
+  -webkit-text-fill-color: #303a82 !important;
+}
+
+/* Botões dentro dos cartões pastéis mantêm leitura branca. */
+.automatic-price-card .price-refresh-btn,
+.automatic-price-card .price-validate-btn {
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}

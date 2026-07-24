@@ -1,3 +1,36 @@
+# v1.3.6 — Contraste final e preços em tons pastéis
+
+- Rótulos de Quantidade, Condição, Acabamento, Idioma, armazenamento e demais formulários agora usam texto claro sobre o fundo escuro.
+- Legendas dos cartões do painel receberam contraste branco/lilás claro.
+- Cartas não possuídas ficaram translúcidas como os Pokémon ausentes da Pokédex, mantendo nomes, números e controles legíveis.
+- Preços encontrados usam fundo verde pastel e texto verde-escuro.
+- Cartas sem preço usam fundo amarelo pastel e texto marrom-escuro.
+- Avisos de validação e botões preservam cores próprias com contraste alto.
+
+# v1.3.5 — Contraste adaptativo e leitura corrigida
+
+- Corrigido texto escuro sobre filtros e campos escuros do Tema Gengar.
+- Cartões brancos de cartas, Pokémon e decks usam roxo-escuro de alto contraste.
+- Cartas não possuídas não deixam mais o cartão inteiro transparente; apenas a miniatura fica suavizada.
+- Selos de quantidade, preço, raridade, wishlist e variantes receberam combinações específicas de fundo e texto.
+- Botões de quantidade mantêm símbolos brancos e o número central permanece legível.
+- Estados desabilitados e placeholders receberam contraste mínimo consistente.
+
+# v1.3.4 — Contraste dos cartões claros
+
+- Textos, números e rótulos em cartões brancos agora usam roxo-escuro.
+- Correção aplicada a cartas, Pokémon registrados, decks, painel, coleções e formulários.
+- Campos brancos e placeholders receberam contraste aprimorado.
+- Botões ativos, selos e indicadores coloridos preservam suas cores originais.
+
+# v1.3.3 — Safe-area e contraste
+
+- Cabeçalho fixo agora ocupa a área da barra de status do Android.
+- Removida a folga vazia entre a borda superior do aparelho e o cabeçalho.
+- Espaçamento seguro preservado para relógio, rede, Wi-Fi e bateria.
+- Textos e números em superfícies brancas usam roxo-escuro de alto contraste.
+- Ajustado contraste de Pokémon registrados, listas de deck e seletores claros.
+
 # v1.3.2 — Wallpaper Gengar e Pokédex nítida
 
 - Mantido o sprite antigo do Gengar no cabeçalho.
